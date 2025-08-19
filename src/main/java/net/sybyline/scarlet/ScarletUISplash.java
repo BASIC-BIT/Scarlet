@@ -22,13 +22,57 @@ public class ScarletUISplash implements AutoCloseable
     public ScarletUISplash(Scarlet scarlet)
     {
         this.scarlet = scarlet;
+        if (!Scarlet.HEADLESS)
+        {
+            // Build splash UI only when not running in headless mode
+            this.splash = new JWindow();
+            this.splashPanel = new JPanel(null);
+            this.splashText = new TransparentJLabel("Loading...", JLabel.CENTER);
+            this.splashSubtext = new TransparentJLabel("", JLabel.CENTER);
+
+            Image image = Toolkit.getDefaultToolkit().createImage(ScarletUI.class.getResource("sybyline_scarlet.png"));
+            this.splash.setSize(400, 450);
+            this.splash.setLocationRelativeTo(null);
+            this.splash.setFocusable(false);
+            this.splash.setBackground(new Color(127, 127, 127, 127));
+            {
+                this.splashPanel.setOpaque(false);
+                {
+                    JLabel jlabel_logo = new JLabel(new ImageIcon(image.getScaledInstance(this.splash.getWidth(), this.splash.getHeight(), Image.SCALE_SMOOTH)), JLabel.CENTER);
+                    this.splashPanel.add(jlabel_logo);
+                    jlabel_logo.setBounds(0, 0, 400, 400);
+                    this.splashPanel.setComponentZOrder(jlabel_logo, 0);
+                    jlabel_logo.revalidate();
+                }
+                {
+                    this.splashText.setFont(new Font("Arial", Font.BOLD, 24));
+                    this.splashText.setBackground(new Color(127, 127, 127, 127));
+                    this.splashText.setForeground(Color.WHITE);
+                    this.splashPanel.add(this.splashText);
+                    this.splashText.setBounds(0, 400, 400, 30);
+                    this.splashPanel.setComponentZOrder(this.splashText, 0);
+                    this.splashText.revalidate();
+                }
+                {
+                    this.splashSubtext.setFont(new Font("Arial", Font.BOLD, 16));
+                    this.splashSubtext.setBackground(new Color(127, 127, 127, 127));
+                    this.splashSubtext.setForeground(Color.WHITE);
+                    this.splashPanel.add(this.splashSubtext);
+                    this.splashSubtext.setBounds(0, 430, 400, 20);
+                    this.splashPanel.setComponentZOrder(this.splashSubtext, 0);
+                    this.splashSubtext.revalidate();
+                }
+            }
+            this.splash.setContentPane(this.splashPanel);
+            this.splash.setVisible(true);
+        }
     }
 
     final Scarlet scarlet;
-    JWindow splash = new JWindow();
-    JPanel splashPanel = new JPanel(null);
-    JLabel splashText = new TransparentJLabel("Loading...", JLabel.CENTER),
-           splashSubtext = new TransparentJLabel("", JLabel.CENTER);
+    JWindow splash;
+    JPanel splashPanel;
+    JLabel splashText,
+           splashSubtext;
 
     public void queueFeedbackPopup(Component component, long durationMillis, String text)
     {
@@ -48,6 +92,8 @@ public class ScarletUISplash implements AutoCloseable
     }
     public void queueFeedbackPopup(Component component, long durationMillis, String text, String subtext, Color textcolor, Color subtextcolor)
     {
+        if (Scarlet.HEADLESS)
+            return;
         if (component == null)
             component = this.scarlet.ui.jframe;
         if (durationMillis < 500L)
@@ -118,44 +164,6 @@ public class ScarletUISplash implements AutoCloseable
         }
     }
 
-    {
-        Image image = Toolkit.getDefaultToolkit().createImage(ScarletUI.class.getResource("sybyline_scarlet.png"));
-        this.splash.setSize(400, 450);
-        this.splash.setLocationRelativeTo(null);
-        this.splash.setFocusable(false);
-        this.splash.setBackground(new Color(127, 127, 127, 127));
-        {
-            this.splashPanel.setOpaque(false);
-            {
-                JLabel jlabel_logo = new JLabel(new ImageIcon(image.getScaledInstance(this.splash.getWidth(), this.splash.getHeight(), Image.SCALE_SMOOTH)), JLabel.CENTER);
-                this.splashPanel.add(jlabel_logo);
-                jlabel_logo.setBounds(0, 0, 400, 400);
-                this.splashPanel.setComponentZOrder(jlabel_logo, 0);
-                jlabel_logo.revalidate();
-            }
-            {
-                this.splashText.setFont(new Font("Arial", Font.BOLD, 24));
-                this.splashText.setBackground(new Color(127, 127, 127, 127));
-                this.splashText.setForeground(Color.WHITE);
-                this.splashPanel.add(this.splashText);
-                this.splashText.setBounds(0, 400, 400, 30);
-                this.splashPanel.setComponentZOrder(this.splashText, 0);
-                this.splashText.revalidate();
-            }
-            {
-                this.splashSubtext.setFont(new Font("Arial", Font.BOLD, 16));
-                this.splashSubtext.setBackground(new Color(127, 127, 127, 127));
-                this.splashSubtext.setForeground(Color.WHITE);
-                this.splashPanel.add(this.splashSubtext);
-                this.splashSubtext.setBounds(0, 430, 400, 20);
-                this.splashPanel.setComponentZOrder(this.splashSubtext, 0);
-                this.splashSubtext.revalidate();
-            }
-        }
-        this.splash.setContentPane(this.splashPanel);
-        this.splash.setVisible(true);
-    }
-
     @Override
     public synchronized void close()
     {
@@ -166,9 +174,19 @@ public class ScarletUISplash implements AutoCloseable
         this.splashPanel = null;
         this.splashText = null;
         this.splashSubtext = null;
-        splash.setVisible(false);
-        splash.dispose();
-        this.scarlet.ui.jframe.setVisible(true);
+        try
+        {
+            splash.setVisible(false);
+            splash.dispose();
+        }
+        catch (Exception ex)
+        {
+            // ignore
+        }
+        if (this.scarlet != null && this.scarlet.ui != null && this.scarlet.ui.jframe != null)
+        {
+            this.scarlet.ui.jframe.setVisible(true);
+        }
     }
 
     public void splashText(String text)

@@ -1,0 +1,23 @@
+# Build output
+/target
+
+# VCS
+/.git
+/.gitignore
+
+# IDE
+/.idea
+/.vscode
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local artifacts
+*.log
+*.tmp
+
+# Docker
+Dockerfile*
+**/.dockerignore

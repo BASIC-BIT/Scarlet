@@ -27,16 +27,23 @@ public class TTSService implements Closeable
 
     public TTSService(File dir, Listener listener) throws IOException
     {
-        this.running = true;
         this.dir = dir;
         this.listener = listener;
         this.installedVoices = new CopyOnWriteArrayList<>();
+        this.running = false;
+
+        // Enable only on Windows (PowerShell + System.Speech)
+        if (!Platform.CURRENT.isNT())
+        {
+            LOG.warn("TTSService disabled: non-Windows OS detected");
+            return;
+        }
         
         String psname = Sys.searchPath("powershell", "pwsh").orElse(null);
         if (psname == null)
         {
-            LOG.error("Powershell not found on this system, TTSService will be broken");
-            psname = "powershell";
+            LOG.warn("TTSService disabled: PowerShell not found");
+            return;
         }
         
         byte[] srcBytes = MiscUtils.readAllBytes(TTSService.class.getResourceAsStream("TTSService.ps1"));
@@ -45,6 +52,7 @@ public class TTSService implements Closeable
         
         this.cleanDir();
         
+        this.running = true;
         this.proc = Runtime.getRuntime().exec(new String[]
         {
             psname,
@@ -168,6 +176,8 @@ public class TTSService implements Closeable
             return false;
         if (value == null)
             return false;
+        if (this.stdin == null)
+            return false;
         this.stdin.println(op+value);
         this.stdin.flush();
         return !this.stdin.checkError();
@@ -179,10 +189,10 @@ public class TTSService implements Closeable
     final File dir;
     final Listener listener;
     final List<String> installedVoices;
-    final Process proc;
-    final PrintStream stdin;
-    final InputStream stdout, stderr;
-    final Thread thread;
+    Process proc;
+    PrintStream stdin;
+    InputStream stdout, stderr;
+    Thread thread;
     String pendingVoiceSelection;
 
     void thread()
@@ -236,29 +246,33 @@ public class TTSService implements Closeable
     public synchronized void close() throws IOException
     {
         this.running = false;
-        this.thread.interrupt();
+        if (this.thread != null)
+            this.thread.interrupt();
         MiscUtils.close(this.stdin);
         MiscUtils.close(this.stdout);
         MiscUtils.close(this.stderr);
         this.cleanDir();
-        try
+        if (this.proc != null)
         {
-            if (this.proc.waitFor(2, TimeUnit.SECONDS))
-                return;
+            try
+            {
+                if (this.proc.waitFor(2, TimeUnit.SECONDS))
+                    return;
+            }
+            catch (InterruptedException iex)
+            {
+            }
+            this.proc.destroy();
+            try
+            {
+                if (this.proc.waitFor(2, TimeUnit.SECONDS))
+                    return;
+            }
+            catch (InterruptedException iex)
+            {
+            }
+            this.proc.destroyForcibly();
         }
-        catch (InterruptedException iex)
-        {
-        }
-        this.proc.destroy();
-        try
-        {
-            if (this.proc.waitFor(2, TimeUnit.SECONDS))
-                return;
-        }
-        catch (InterruptedException iex)
-        {
-        }
-        this.proc.destroyForcibly();
     }
 
 }

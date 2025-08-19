@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  scarlet:
+    build: .
+    image: scarlet:headless
+    container_name: scarlet
+    environment:
+      - SCARLET_HOME=/data
+      - SCARLET_HEADLESS=true
+      - JAVA_OPTS=-Xms256m -Xmx512m
+    volumes:
+      - scarlet-data:/data
+      - ./configs/settings.json:/data/settings.json
+      - ./configs/discord_bot.json:/data/discord_bot.json
+      - ./configs/discord_perms.json:/data/discord_perms.json
+      - ./configs/store.bin:/data/store.bin
+    restart: unless-stopped
+    # No ports exposed; the app is client-style
+
+volumes:
+  scarlet-data:
+

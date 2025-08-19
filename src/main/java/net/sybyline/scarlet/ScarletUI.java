@@ -126,7 +126,16 @@ public class ScarletUI implements AutoCloseable
     public ScarletUI(Scarlet scarlet)
     {
         this.scarlet = scarlet;
-        this.jframe = new JFrame(Scarlet.NAME);
+        JFrame frame = null;
+        if (!Scarlet.HEADLESS) try
+        {
+            frame = new JFrame(Scarlet.NAME);
+        }
+        catch (Throwable ex)
+        {
+            LOG.warn("Headless environment detected, disabling UI");
+        }
+        this.jframe = frame;
         this.jtabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
         this.propstable = new PropsTable<>();
         this.jpanel_settings = new JPanel();
@@ -135,7 +144,10 @@ public class ScarletUI implements AutoCloseable
         this.propstableColumsDirty = false;
         this.connectedPlayers = new HashMap<>();
         
-        this.initUI();
+        if (this.jframe != null)
+        {
+            this.initUI();
+        }
     }
 
     void setUIScale()
@@ -981,9 +993,13 @@ public class ScarletUI implements AutoCloseable
     @Override
     public void close() throws Exception
     {
-        this.saveSettings(false);
-        this.saveInstanceColumns();
-        this.jframe.dispose();
+        if (!Scarlet.HEADLESS)
+        {
+            this.saveSettings(false);
+            this.saveInstanceColumns();
+        }
+        if (this.jframe != null)
+            this.jframe.dispose();
     }
 
     void readdSettingUI()

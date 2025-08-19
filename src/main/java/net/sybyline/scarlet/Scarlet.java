@@ -58,6 +58,15 @@ import net.sybyline.scarlet.util.VrcIds;
 public class Scarlet implements Closeable
 {
 
+    public static final boolean HEADLESS;
+    static {
+        String headless = System.getProperty("SCARLET_HEADLESS", System.getenv("SCARLET_HEADLESS"));
+        boolean jreHeadless = Boolean.getBoolean("java.awt.headless");
+        HEADLESS = (headless != null && headless.equalsIgnoreCase("true")) || jreHeadless;
+        if (HEADLESS)
+            System.setProperty("java.awt.headless", "true");
+    }
+
     public static final int JVM_DATA_MODEL;
     public static final int JAVA_SPEC;
 
@@ -279,7 +288,7 @@ public class Scarlet implements Closeable
     final ScarletSettings settings = new ScarletSettings(new File(dir, "settings.json"));
     {
         Float uiScale = this.settings.getObject("ui_scale", Float.class);
-        if (uiScale != null) Swing.scaleAll(uiScale.floatValue());
+        if (!HEADLESS && uiScale != null) Swing.scaleAll(uiScale.floatValue());
         String groupId = this.settings.getString("vrchat_group_id");
         if (groupId != null && !(groupId = VrcIds.resolveGroupId(groupId)).isEmpty())
         {
@@ -655,7 +664,7 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             if (!Objects.equals(this.newerVersion, cmp_version) && MiscUtils.compareSemVer(VERSION, cmp_version) < 0)
             {
                 LOG.info(NAME+" version "+cmp_version+" available");
-                if (this.alertForUpdates.get())
+                if (this.alertForUpdates.get() && !HEADLESS)
                 {
                     this.execModal.execute(() -> JOptionPane.showMessageDialog(null, NAME+" version "+cmp_version+" available", "Update available", JOptionPane.INFORMATION_MESSAGE));
                 }
