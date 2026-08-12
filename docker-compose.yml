@@ -15,7 +15,15 @@ services:
       - ./configs/discord_bot.json:/data/discord_bot.json
       - ./configs/discord_perms.json:/data/discord_perms.json
       - ./configs/store.bin:/data/store.bin
-    restart: unless-stopped
+    # Bounded on purpose. `unless-stopped` is what turned a startup crash into
+    # 10559 restarts and roughly 10559 Discord logins, which is what got the bot
+    # token reset. The crash was the bug; this policy was the amplifier, and it
+    # would amplify the next unrelated crash exactly as well.
+    #
+    # Five attempts still absorbs a transient failure. What it will not do is
+    # hammer a third-party API for a week unattended. A service that is still
+    # down after five tries needs a human, not another retry.
+    restart: on-failure:5
     # Hard ceiling on the container. This host is shared with other services, so
     # an unbounded JVM here is their outage too: the old flags let the heap alone
     # reach ~1960 MB on a 3.9 GB box. Keep this above the Dockerfile's -Xmx,
