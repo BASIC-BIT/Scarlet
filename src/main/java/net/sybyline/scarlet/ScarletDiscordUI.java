@@ -26,7 +26,7 @@ import com.google.gson.JsonObject;
 import io.github.vrchatapi.ApiException;
 import io.github.vrchatapi.JSON;
 import io.github.vrchatapi.model.GroupAccessType;
-import io.github.vrchatapi.model.GroupLimitedMember;
+import io.github.vrchatapi.model.GroupMember;
 import io.github.vrchatapi.model.GroupMemberStatus;
 import io.github.vrchatapi.model.GroupPermissions;
 import io.github.vrchatapi.model.Instance;
@@ -44,24 +44,27 @@ import net.dv8tion.jda.api.events.interaction.ModalInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
 import net.dv8tion.jda.api.events.interaction.component.StringSelectInteractionEvent;
 import net.dv8tion.jda.api.interactions.InteractionHook;
-import net.dv8tion.jda.api.interactions.components.ActionRow;
-import net.dv8tion.jda.api.interactions.components.selections.StringSelectMenu;
-import net.dv8tion.jda.api.interactions.components.text.TextInput;
-import net.dv8tion.jda.api.interactions.components.text.TextInputStyle;
-import net.dv8tion.jda.api.interactions.modals.Modal;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
+import net.dv8tion.jda.api.components.buttons.Button;
+import net.dv8tion.jda.api.components.label.Label;
+import net.dv8tion.jda.api.components.selections.SelectOption;
+import net.dv8tion.jda.api.components.selections.StringSelectMenu;
+import net.dv8tion.jda.api.components.textinput.TextInput;
+import net.dv8tion.jda.api.components.textinput.TextInputStyle;
+import net.dv8tion.jda.api.modals.Modal;
 import net.dv8tion.jda.api.utils.MarkdownSanitizer;
 import net.dv8tion.jda.api.utils.MarkdownUtil;
 import net.sybyline.scarlet.ScarletDiscordJDA.InstanceCreation;
 import net.sybyline.scarlet.server.discord.DInteractions.ButtonClk;
 import net.sybyline.scarlet.server.discord.DInteractions.Ephemeral;
 import net.sybyline.scarlet.server.discord.DInteractions.ModalSub;
-import net.sybyline.scarlet.server.discord.DInteractions.Pagination;
 import net.sybyline.scarlet.server.discord.DInteractions.StringSel;
 import net.sybyline.scarlet.util.HttpURLInputStream;
 import net.sybyline.scarlet.util.MiscUtils;
 import net.sybyline.scarlet.util.UniqueStrings;
 import net.sybyline.scarlet.util.VRChatHelpDeskURLs;
 import net.sybyline.scarlet.util.VrcIds;
+import net.sybyline.scarlet.util.VrcWeb;
 
 public class ScarletDiscordUI
 {
@@ -76,14 +79,43 @@ public class ScarletDiscordUI
 
     final ScarletDiscordJDA discord;
 
+    @ModalSub("watched-group-set-notes")
+    public void watchedGroupSetNotes(ModalInteractionEvent event)
+    {
+        String[] parts = event.getModalId().split(":");
+        String groupId = parts[1];
+        ScarletWatchedGroups.WatchedGroup watchedGroup = this.discord.scarlet.watchedGroups.getWatchedGroup(groupId);
+        if (watchedGroup == null)
+        {
+            event.reply("That group is not watched").setEphemeral(true).queue();
+            return;
+        }
+        event.reply("Set notes for group").setEphemeral(true).queue();
+        watchedGroup.notes = event.getValue("notes").getAsString();
+        this.discord.scarlet.watchedGroups.save();
+    }
+
+    @ModalSub("watched-entity-set-notes")
+    public void watchedEntitySetNotes(ModalInteractionEvent event)
+    {
+        String[] parts = event.getModalId().split(":");
+        String entityKind = parts[1],
+               entityId = parts[2];
+        ScarletDiscordCommands.WatchedEntity_<?> watchedEntityCommand = this.discord.discordCommands.watchedEntityCommands.get(entityKind);
+        if (watchedEntityCommand == null)
+        {
+            LOG.error("@ModalSub(watched-entity-set-notes): Unknown watched entity kind `"+entityKind+"`: `"+entityId+"`");
+            return;
+        }
+        watchedEntityCommand._setNotes(event, entityId);
+    }
+
     @ButtonClk("edit-tags")
     @Ephemeral
     public void editTags(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
-        
-        // TODO : set default selected
-        
+        String[] parts = event.getButton().getCustomId().split(":");
+                
         List<ScarletModerationTags.Tag> tags = this.discord.scarlet.moderationTags.getTags();
         
         if (tags == null || tags.isEmpty())
@@ -94,33 +126,43 @@ public class ScarletDiscordUI
         
         String auditEntryId = parts[1];
         
-        StringSelectMenu.Builder builder = StringSelectMenu
-            .create("select-tags:"+auditEntryId)
-            .setMinValues(0)
-            .setMaxValues(tags.size())
-            .setPlaceholder("Select tags")
-            ;
-        
-        for (ScarletModerationTags.Tag tag : tags)
+        int total = tags.size();
+        StringSelectMenu.Builder[] builders = new StringSelectMenu.Builder[(total - 1) / 25 + 1];
+        for (int i = 0; i < builders.length; i++)
         {
+            builders[i] = StringSelectMenu.create((i == 0 ? "select-tags:" : ("select-tags-"+i+":")) + auditEntryId);
+        }
+        
+        for (int i = 0; i < total; i++)
+        {
+            ScarletModerationTags.Tag tag = tags.get(i);
             String value = tag.value,
                    label = tag.label != null ? tag.label : tag.value,
                    desc = tag.description;
             if (desc == null)
-                builder.addOption(label, MiscUtils.maybeEllipsis(100, value));
+                builders[i / 25].addOption(label, MiscUtils.maybeEllipsis(100, value));
             else
-                builder.addOption(label, MiscUtils.maybeEllipsis(100, value), MiscUtils.maybeEllipsis(50, desc));
+                builders[i / 25].addOption(label, MiscUtils.maybeEllipsis(100, value), MiscUtils.maybeEllipsis(50, desc));
+        }
+        for (int i = 0; i < builders.length; i++)
+        {
+            builders[i]
+                .setMinValues(0)
+                .setMaxValues(builders[i].getOptions().size())
+                .setPlaceholder("Select tags ("+(i*25+1)+"-"+(i*25+builders[i].getOptions().size())+")")
+                ;
         }
         
         ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata(auditEntryId);
         if (auditEntryMeta != null && auditEntryMeta.hasTags())
         {
-            builder.setDefaultValues(auditEntryMeta.entryTags.toArray());
+            for (int i = 0; i < builders.length; i++)
+            {
+                builders[i].setDefaultValues(auditEntryMeta.entryTags.toArray());
+            }
         }
         
-        ActionRow ar = ActionRow.of(builder.build());
-        
-        hook.sendMessageComponents(ar)
+        hook.sendMessageComponents(Arrays.asList(MiscUtils.map(builders, ActionRow[]::new, $ -> ActionRow.of($.build()))))
             .setEphemeral(true)
             .queue();
     }
@@ -129,18 +171,55 @@ public class ScarletDiscordUI
     @Ephemeral
     public void selectTags(StringSelectInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
-        String joined = event.getValues().stream().map(this.discord.scarlet.moderationTags::getTagLabel).collect(Collectors.joining(", ", "### Setting tags:\n", ""));
-        MessageEmbed[] embeds = event.getValues().stream().map(this.discord.scarlet.moderationTags::getTag).filter(Objects::nonNull).map(tag -> new EmbedBuilder().setAuthor(MiscUtils.maybeEllipsis(256, tag.label)).setDescription(MiscUtils.maybeEllipsis(4096, tag.description)).build()).toArray(MessageEmbed[]::new);
+        this.selectTags_(event, hook);
+    }
+    @StringSel("select-tags-1")
+    @Ephemeral
+    public void selectTags1(StringSelectInteractionEvent event, InteractionHook hook)
+    {
+        this.selectTags_(event, hook);
+    }
+    @StringSel("select-tags-2")
+    @Ephemeral
+    public void selectTags2(StringSelectInteractionEvent event, InteractionHook hook)
+    {
+        this.selectTags_(event, hook);
+    }
+    @StringSel("select-tags-3")
+    @Ephemeral
+    public void selectTags3(StringSelectInteractionEvent event, InteractionHook hook)
+    {
+        this.selectTags_(event, hook);
+    }
+    @StringSel("select-tags-4")
+    @Ephemeral
+    public void selectTags4(StringSelectInteractionEvent event, InteractionHook hook)
+    {
+        this.selectTags_(event, hook);
+    }
+    private void selectTags_(StringSelectInteractionEvent event, InteractionHook hook)
+    {
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
+        
+        String auditEntryId = parts[1];
+        
+        ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata_editTags(auditEntryId,
+                event.getSelectMenu().getOptions().stream().map(SelectOption::getValue).filter($ -> !event.getValues().contains($)).toArray(String[]::new),
+                event.getValues().toArray(new String[0]));
+        
+        String joined = auditEntryMeta.entryTags.stream().map(this.discord.scarlet.moderationTags::getTagLabel).collect(Collectors.joining(", ", "### Setting tags:\n", ""));
+        
+        MessageEmbed[] embeds = auditEntryMeta.entryTags.stream().map(this.discord.scarlet.moderationTags::getTag).filter(Objects::nonNull).map(tag -> new EmbedBuilder().setAuthor(MiscUtils.maybeEllipsis(256, tag.label)).setDescription(MiscUtils.maybeEllipsis(4096, tag.description)).build()).toArray(MessageEmbed[]::new);
+        
         this.discord.interactions.new Pagination(event.getId(), embeds, 10).withAdditional((action, page) -> action.setContent(joined)).queue(hook);
-        ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata_setTags(parts[1], event.getValues().toArray(new String[0]));
+        
         this.updateAuxMessage(event.getChannel(), auditEntryMeta);
     }
 
     @ButtonClk("vrchat-user-edit-manager-notes")
     public void vrchatUserEditManagerNotes(ButtonInteractionEvent event)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
 
         String vrcTargetId = parts[1];
         
@@ -159,12 +238,12 @@ public class ScarletDiscordUI
             return;
         }
         
-        GroupLimitedMember glm = this.discord.scarlet.vrc.getGroupMembership(this.discord.scarlet.vrc.groupId, vrcTargetId);
+        GroupMember glm = this.discord.scarlet.vrc.getGroupMembership(this.discord.scarlet.vrc.groupId, vrcTargetId);
         String value = glm == null ? null : glm.getManagerNotes();
         
         event.replyModal(Modal.create("vrchat-user-edit-manager-notes:"+vrcTargetId, "Manager notes for "+MarkdownSanitizer.escape(sc.getDisplayName()))
-                .addActionRow(TextInput.create("manager-notes:"+vrcTargetId, "Notes", TextInputStyle.PARAGRAPH)
-                    .setValue(value).build())
+                .addComponents(Label.of("Notes", TextInput.create("manager-notes:"+vrcTargetId, TextInputStyle.PARAGRAPH)
+                    .setValue(value).build()))
             .build());
     }
 
@@ -198,7 +277,7 @@ public class ScarletDiscordUI
     @ButtonClk("vrchat-user-ban")
     public void vrchatUserBan(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
 
         String vrcTargetId = parts[1];
         
@@ -230,6 +309,8 @@ public class ScarletDiscordUI
                 return false;
             }
         }
+        if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_bans_manage, hook))
+            return false;
         
         GroupMemberStatus status = this.discord.scarlet.vrc.getGroupMembershipStatus(this.discord.scarlet.vrc.groupId, vrcTargetId);
         
@@ -259,7 +340,7 @@ public class ScarletDiscordUI
     @StringSel("immediate-ban-select-tags")
     public void immediateBanSelectTags(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String targetUserId = parts[1];
         if (this.discord.scarlet.pendingModActions.setBanInfoTags(targetUserId, event.getValues().toArray(new String[0])))
         {
@@ -272,16 +353,14 @@ public class ScarletDiscordUI
     @ButtonClk("immediate-ban-edit-desc")
     public void immediateBanEditDesc(ButtonInteractionEvent event)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String targetUserId = parts[1];
-        TextInput.Builder ti = TextInput
-            .create("input-desc:"+targetUserId, "Input description", TextInputStyle.PARAGRAPH)
-            .setRequired(true)
-            .setPlaceholder("Event description")
-            ;
         
         Modal.Builder m = Modal.create("immediate-ban-edit-desc:"+targetUserId, "Edit description")
-            .addActionRow(ti.build())
+            .addComponents(Label.of("Input description", TextInput
+                    .create("input-desc:"+targetUserId, TextInputStyle.PARAGRAPH)
+                    .setRequired(true)
+                    .setPlaceholder("Event description").build()))
             ;
         
         event.replyModal(m.build()).queue();
@@ -303,7 +382,7 @@ public class ScarletDiscordUI
     @ButtonClk("immediate-ban-cancel")
     public void immediateBanCancel(ButtonInteractionEvent event)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String targetUserId = parts[1];
         event.deferEdit().queue();
         this.discord.scarlet.pendingModActions.pollBanInfo(targetUserId);
@@ -313,7 +392,7 @@ public class ScarletDiscordUI
     @ButtonClk("immediate-ban-confirm")
     public void immediateBanConfirm(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String targetUserId = parts[1];
         if (this._vrchatUserBan(hook, event.getMember(), targetUserId))
         {
@@ -340,6 +419,8 @@ public class ScarletDiscordUI
                 return;
             }
         }
+        if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_bans_manage, event))
+            return;
         
         List<ScarletDiscordJDA.Action> banActions = new ArrayList<>();
         
@@ -354,14 +435,14 @@ public class ScarletDiscordUI
         
         this.discord.queuedActions.addAll(banActions);
         
-        event.replyFormat("Queuing %s user ban(s)").setEphemeral(true).queue();
+        event.replyFormat("Queuing %s user ban(s)", banActions.size()).setEphemeral(true).queue();
     }
 
     @ButtonClk("vrchat-user-unban")
     @Ephemeral
     public void vrchatUserUnban(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
 
         String vrcTargetId = parts[1];
         
@@ -388,6 +469,8 @@ public class ScarletDiscordUI
                 return;
             }
         }
+        if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_bans_manage, hook))
+            return;
         
         GroupMemberStatus status = this.discord.scarlet.vrc.getGroupMembershipStatus(this.discord.scarlet.vrc.groupId, vrcTargetId);
         
@@ -431,6 +514,8 @@ public class ScarletDiscordUI
                 return;
             }
         }
+        if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_bans_manage, event))
+            return;
         
         List<ScarletDiscordJDA.Action> unbanActions = new ArrayList<>();
         
@@ -445,14 +530,14 @@ public class ScarletDiscordUI
         
         this.discord.queuedActions.addAll(unbanActions);
         
-        event.replyFormat("Queuing %s user unban(s)").setEphemeral(true).queue();
+        event.replyFormat("Queuing %s user unban(s)", unbanActions.size()).setEphemeral(true).queue();
     }
 
     @ButtonClk("event-redact")
     @Ephemeral
     public void eventRedact(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         
         String auditEntryId = parts[1];
         
@@ -500,7 +585,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void eventUnredact(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         
         String auditEntryId = parts[1];
         
@@ -528,7 +613,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void newInstanceCreate(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         long within1day = System.currentTimeMillis() - 86400_000L;
         
         String vrcActorId = this.discord.scarlet.data.globalMetadata_getSnowflakeId(event.getUser().getId());
@@ -560,71 +645,46 @@ public class ScarletDiscordUI
         switch (ic.groupAccessType)
         {
         case PUBLIC: {
-            if (!this.discord.checkMemberHasVRChatPermission(GroupPermissions.group_instance_public_create, event.getMember()))
-            {
-                hook.sendMessage("You do not have permission to create group public instances.").setEphemeral(true).queue();
+            if (!this.discord.checkMemberRespondVrcPerms(GroupPermissions.group_instance_public_create, hook, event.getMember()))
                 return;
-            }
         } break;
         case PLUS: {
-            if (!this.discord.checkMemberHasVRChatPermission(GroupPermissions.group_instance_plus_create, event.getMember()))
-            {
-                hook.sendMessage("You do not have permission to create group plus instances.").setEphemeral(true).queue();
+            if (!this.discord.checkMemberRespondVrcPerms(GroupPermissions.group_instance_plus_create, hook, event.getMember()))
                 return;
-            }
         } break;
         case MEMBERS: {
-            if (!this.discord.checkMemberHasVRChatPermission(GroupPermissions.group_instance_open_create, event.getMember()))
-            {
-                hook.sendMessage("You do not have permission to create group member-only instances.").setEphemeral(true).queue();
+            if (!this.discord.checkMemberRespondVrcPerms(GroupPermissions.group_instance_open_create, hook, event.getMember()))
                 return;
-            }
-            if (ic.roleIds != null && !this.discord.checkMemberHasVRChatPermission(GroupPermissions.group_instance_restricted_create, event.getMember()))
-            {
-                hook.sendMessage("You do not have permission to create role-restricted instances.").setEphemeral(true).queue();
+            if (ic.roleIds != null && !this.discord.checkMemberRespondVrcPerms(GroupPermissions.group_instance_restricted_create, hook, event.getMember()))
                 return;
-            }
         } break;
         }
 
-        if (ic.ageGate != null && ic.ageGate.booleanValue() && !this.discord.checkMemberHasVRChatPermission(GroupPermissions.group_instance_age_gated_create, event.getMember()))
-        {
+        if (ic.ageGate != null && ic.ageGate.booleanValue() && !this.discord.checkMemberRespondVrcPerms(GroupPermissions.group_instance_age_gated_create, hook, event.getMember()))
             hook.sendMessage("You do not have permission to create age gated instances.").setEphemeral(true).queue();
-            return;
-        }
         
         hook.deleteMessageById(event.getMessageId()).queue();
 
         switch (ic.groupAccessType)
         {
         case PUBLIC: {
-            if (!this.discord.scarlet.vrc.checkSelfUserHasVRChatPermission(GroupPermissions.group_instance_public_create))
-            {
-                hook.sendMessage(this.discord.scarlet.vrc.messageNeedPerms(GroupPermissions.group_instance_public_create)).setEphemeral(true).queue();
-            }
+            if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_instance_public_create, hook))
+                return;
         } break;
         case PLUS: {
-            if (!this.discord.scarlet.vrc.checkSelfUserHasVRChatPermission(GroupPermissions.group_instance_plus_create))
-            {
-                hook.sendMessage(this.discord.scarlet.vrc.messageNeedPerms(GroupPermissions.group_instance_plus_create)).setEphemeral(true).queue();
-            }
+            if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_instance_plus_create, hook))
+                return;
         } break;
         case MEMBERS: {
-            if (!this.discord.scarlet.vrc.checkSelfUserHasVRChatPermission(GroupPermissions.group_instance_open_create))
-            {
-                hook.sendMessage(this.discord.scarlet.vrc.messageNeedPerms(GroupPermissions.group_instance_open_create)).setEphemeral(true).queue();
-            }
-            if (ic.roleIds != null && !this.discord.scarlet.vrc.checkSelfUserHasVRChatPermission(GroupPermissions.group_instance_restricted_create))
-            {
-                hook.sendMessage(this.discord.scarlet.vrc.messageNeedPerms(GroupPermissions.group_instance_restricted_create)).setEphemeral(true).queue();
-            }
+            if (!this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_instance_open_create, hook))
+                return;
+            if (ic.roleIds != null && !this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_instance_restricted_create, hook))
+                return;
         } break;
         }
         
-        if (ic.ageGate != null && ic.ageGate.booleanValue() && !this.discord.scarlet.vrc.checkSelfUserHasVRChatPermission(GroupPermissions.group_instance_age_gated_create))
-        {
-            hook.sendMessage(this.discord.scarlet.vrc.messageNeedPerms(GroupPermissions.group_instance_age_gated_create)).setEphemeral(true).queue();
-        }
+        if (ic.ageGate != null && ic.ageGate.booleanValue() && !this.discord.checkSelfRespondVrcPerms(GroupPermissions.group_instance_age_gated_create, hook))
+            return;
         
         Instance instance;
         try
@@ -650,7 +710,7 @@ public class ScarletDiscordUI
         String worldName = this.discord.getLocationName(instance.getWorldId());
         
         LOG.info(String.format("%s (%s) opened an instance of %s: %s", vrcActorDisplayName, vrcActorId, worldName, instance.getId()));
-        hook.sendMessageFormat("Created [new %s instance](https://vrchat.com/home/launch?worldId=%s&instanceId=%s)", worldName, instance.getWorldId(), instance.getInstanceId()).setEphemeral(true).queue();
+        hook.sendMessageFormat("Created [new %s instance](%s)", worldName, VrcWeb.Home.instance(instance.getWorldId(), instance.getInstanceId())).setEphemeral(true).queue();
         
     }
 
@@ -658,7 +718,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void newInstanceCancel(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String ictoken = parts[1];
         this.discord.instanceCreation.remove(ictoken);
         hook.deleteMessageById(event.getMessageId()).queue();
@@ -668,13 +728,13 @@ public class ScarletDiscordUI
     @ButtonClk("new-instance-modal")
     public void newInstanceModal(ButtonInteractionEvent event)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String ictoken = parts[1];
         InstanceCreation ic = this.discord.instanceCreation.get(ictoken);
         event.replyModal(Modal.create("new-instance-modal:"+ictoken, "Additional options")
-                .addActionRow(TextInput.create("display-name:"+ictoken, "Display name (unknown purpose)", TextInputStyle.SHORT)
+                .addComponents(Label.of("Display name (unknown purpose)", TextInput.create("display-name:"+ictoken, TextInputStyle.SHORT)
                     .setValue(ic == null ? null : ic.displayName)
-                    .build())
+                    .build()))
                 .build())
             .queue();
     }
@@ -698,7 +758,7 @@ public class ScarletDiscordUI
     @StringSel("new-instance-region")
     public void newInstanceRegion(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String ictoken = parts[1];
         InstanceCreation ic = this.discord.instanceCreation.get(ictoken);
         if (ic != null) try
@@ -716,7 +776,7 @@ public class ScarletDiscordUI
     @StringSel("new-instance-access-type")
     public void newInstanceAccessType(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String ictoken = parts[1];
         InstanceCreation ic = this.discord.instanceCreation.get(ictoken);
         if (ic != null) try
@@ -734,7 +794,7 @@ public class ScarletDiscordUI
     @StringSel("new-instance-roles")
     public void newInstanceRoles(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String ictoken = parts[1];
         InstanceCreation ic = this.discord.instanceCreation.get(ictoken);
         if (ic != null) try
@@ -752,7 +812,7 @@ public class ScarletDiscordUI
     @StringSel("new-instance-flags")
     public void newInstanceFlags(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String ictoken = parts[1];
         InstanceCreation ic = this.discord.instanceCreation.get(ictoken);
         if (ic != null) try
@@ -760,10 +820,13 @@ public class ScarletDiscordUI
             ic.queueEnabled = event.getValues().contains("queueEnabled");
             ic.hardClose = event.getValues().contains("hardClose");
             ic.ageGate = event.getValues().contains("ageGate");
+            ic.inviteOnly = event.getValues().contains("inviteOnly");
+            ic.canRequestInvite = event.getValues().contains("canRequestInvite");
 //            ic.playerPersistenceEnabled = event.getValues().contains("playerPersistenceEnabled");
 //            ic.instancePersistenceEnabled = event.getValues().contains("instancePersistenceEnabled");
             ic.contentSettings_drones = event.getValues().contains("contentSettings.drones");
             ic.contentSettings_emoji = event.getValues().contains("contentSettings.emoji");
+            ic.contentSettings_props = event.getValues().contains("contentSettings.props");
             ic.contentSettings_pedestals = event.getValues().contains("contentSettings.pedestals");
             ic.contentSettings_prints = event.getValues().contains("contentSettings.prints");
             ic.contentSettings_stickers = event.getValues().contains("contentSettings.stickers");
@@ -779,10 +842,10 @@ public class ScarletDiscordUI
     @ButtonClk("edit-desc")
     public void editDesc(ButtonInteractionEvent event)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String auditEntryId = parts[1];
         TextInput.Builder ti = TextInput
-            .create("input-desc:"+auditEntryId, "Input description", TextInputStyle.PARAGRAPH)
+            .create("input-desc:"+auditEntryId, TextInputStyle.PARAGRAPH)
             .setRequired(true)
             .setPlaceholder("Event description")
             ;
@@ -792,7 +855,7 @@ public class ScarletDiscordUI
             ti.setValue(auditEntryMeta.entryDescription);
         
         Modal.Builder m = Modal.create("edit-desc:"+auditEntryId, "Edit description")
-            .addActionRow(ti.build())
+            .addComponents(Label.of("Input description", ti.build()))
             ;
         
         event.replyModal(m.build()).queue();
@@ -812,7 +875,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void vrchatReport(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         
         String auditEntryId = parts[1];
         if (auditEntryId.endsWith("null")) auditEntryId = auditEntryId.substring(0, auditEntryId.length() - 4); // bugfix
@@ -958,8 +1021,8 @@ public class ScarletDiscordUI
             .filter(Objects::nonNull)
             .map($ -> 
                 new EmbedBuilder()
-                .setAuthor($.getAuthorName(), "https://vrchat.com/home/user/"+$.getAuthorId(), null)
-                .setTitle($.getName(), "https://vrchat.com/home/avatar/"+$.getId())
+                .setAuthor($.getAuthorName(), VrcWeb.Home.user($.getAuthorId()), null)
+                .setTitle($.getName(), VrcWeb.Home.avatar($.getId()))
                 .setThumbnail($.getImageUrl() == null || $.getImageUrl().isEmpty() ? null : $.getImageUrl())
                 .setDescription($.getDescription() == null || $.getDescription().isEmpty() ? null : $.getDescription())
                 .addField("Report avatar", MarkdownUtil.maskedLink("link", VRChatHelpDeskURLs.newModerationRequest_content_avatar(this.discord.requestingEmail.get(), $.getId(), null, null)), false)
@@ -974,7 +1037,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void viewSnapshotUser(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String auditEntryId = parts[1];
         ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata(auditEntryId);
         if (auditEntryMeta == null)
@@ -1012,7 +1075,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void viewSnapshotUserGroups(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String auditEntryId = parts[1];
         ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata(auditEntryId);
         if (auditEntryMeta == null)
@@ -1030,7 +1093,7 @@ public class ScarletDiscordUI
             JsonObject object = $.getAsJsonObject();
             EmbedBuilder embed = new EmbedBuilder();
             embed.setAuthor(object.get(LimitedUserGroups.SERIALIZED_NAME_SHORT_CODE).getAsString()+"."+object.get(LimitedUserGroups.SERIALIZED_NAME_DISCRIMINATOR).getAsString(), null, object.get(LimitedUserGroups.SERIALIZED_NAME_ICON_URL).getAsString());
-            embed.setTitle(MarkdownSanitizer.escape(object.get(LimitedUserGroups.SERIALIZED_NAME_NAME).getAsString()), "https://vrchat.com/home/groups/"+object.get(LimitedUserGroups.SERIALIZED_NAME_GROUP_ID).getAsString());
+            embed.setTitle(MarkdownSanitizer.escape(object.get(LimitedUserGroups.SERIALIZED_NAME_NAME).getAsString()), VrcWeb.Home.group(object.get(LimitedUserGroups.SERIALIZED_NAME_GROUP_ID).getAsString()));
             embed.setDescription(object.get(LimitedUserGroups.SERIALIZED_NAME_DESCRIPTION).getAsString());
             embed.setThumbnail(object.get(LimitedUserGroups.SERIALIZED_NAME_BANNER_URL).getAsString());
             return embed.build();
@@ -1042,7 +1105,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void viewSnapshotUserRepresentedGroup(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String auditEntryId = parts[1];
         ScarletData.AuditEntryMetadata auditEntryMeta = this.discord.scarlet.data.auditEntryMetadata(auditEntryId);
         if (auditEntryMeta == null)
@@ -1080,7 +1143,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void submitEvidence(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String messageSnowflake = parts[1];
         Message message = event.getChannel().retrieveMessageById(messageSnowflake).complete();
         this.submitEvidence(event, hook, message::getAttachments, "You must reply to an audit event message in the relevant thread.");
@@ -1114,11 +1177,12 @@ public class ScarletDiscordUI
             .complete()
             .getRetrievedHistory()
             .stream()
-            .map(Message::getButtons)
+            .map(Message::getComponentTree)
+            .map($->$.findAll(Button.class))
             .flatMap(List::stream)
-            .filter($ -> $.getId().startsWith("edit-tags:"))
+            .filter($ -> $.getCustomId().startsWith("edit-tags:"))
             .findFirst()
-            .map($ -> $.getId().split(":"))
+            .map($ -> $.getCustomId().split(":"))
             .orElse(null)
             ;
         
@@ -1208,7 +1272,7 @@ public class ScarletDiscordUI
     @Ephemeral
     public void importWatchedGroups(ButtonInteractionEvent event, InteractionHook hook)
     {
-        String[] parts = event.getButton().getId().split(":");
+        String[] parts = event.getButton().getCustomId().split(":");
         String messageSnowflake = parts[1];
         
         Message message = event.getChannel().retrieveMessageById(messageSnowflake).complete();
@@ -1283,10 +1347,34 @@ public class ScarletDiscordUI
         }
     }
 
+    @ModalSub("edit-report-template")
+    public void editReportTemplate(ModalInteractionEvent event)
+    {
+        String contents = event.getValue("report-template").getAsString();
+        try
+        {
+            if (this.discord.scarlet.vrcReport.trySet(contents))
+            {
+                LOG.info("Successfully edited report template");
+                event.replyFormat("Successfully edited report template").setEphemeral(true).queue();
+            }
+            else
+            {
+                LOG.warn("Failed to edited report template: empty content");
+                event.replyFormat("Failed to edited report template: empty content").setEphemeral(true).queue();
+            }
+        }
+        catch (Exception ex)
+        {
+            LOG.error("Exception editing report template", ex);
+            event.replyFormat("Exception while editing report template: %s", ex).setEphemeral(true).queue();
+        }
+    }
+
     @StringSel("set-audit-aux-webhooks")
     public void setAuditAuxWebhooks(StringSelectInteractionEvent event)
     {
-        String[] parts = event.getSelectMenu().getId().split(":");
+        String[] parts = event.getSelectMenu().getCustomId().split(":");
         String auditType0 = parts[1];
         GroupAuditType auditType = GroupAuditType.of(auditType0);
         if (auditType == null)

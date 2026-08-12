@@ -1,5 +1,6 @@
 package net.sybyline.scarlet;
 
+import java.awt.GraphicsEnvironment;
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -45,6 +46,7 @@ import com.google.gson.JsonObject;
 
 import io.github.vrchatapi.JSON;
 import io.github.vrchatapi.api.GroupsApi;
+import io.github.vrchatapi.model.Avatar;
 import io.github.vrchatapi.model.CreateInstanceRequest;
 import io.github.vrchatapi.model.GroupAccessType;
 import io.github.vrchatapi.model.GroupAuditLogEntry;
@@ -54,8 +56,11 @@ import io.github.vrchatapi.model.GroupRole;
 import io.github.vrchatapi.model.InstanceContentSettings;
 import io.github.vrchatapi.model.InstanceRegion;
 import io.github.vrchatapi.model.InstanceType;
+import io.github.vrchatapi.model.InventoryItem;
 import io.github.vrchatapi.model.LimitedUserGroups;
+import io.github.vrchatapi.model.ModelFile;
 import io.github.vrchatapi.model.Print;
+import io.github.vrchatapi.model.Prop;
 import io.github.vrchatapi.model.User;
 import io.github.vrchatapi.model.World;
 
@@ -63,7 +68,10 @@ import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
+import net.dv8tion.jda.api.audio.AudioModuleConfig;
 import net.dv8tion.jda.api.audio.AudioSendHandler;
+import net.dv8tion.jda.api.components.actionrow.ActionRow;
+import net.dv8tion.jda.api.components.buttons.Button;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.IncomingWebhookClient;
@@ -90,11 +98,11 @@ import net.dv8tion.jda.api.events.session.ShutdownEvent;
 import net.dv8tion.jda.api.exceptions.InvalidTokenException;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
 import net.dv8tion.jda.api.interactions.Interaction;
+import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.callbacks.IReplyCallback;
 import net.dv8tion.jda.api.interactions.commands.Command;
 import net.dv8tion.jda.api.interactions.commands.ICommandReference;
 import net.dv8tion.jda.api.interactions.commands.build.CommandData;
-import net.dv8tion.jda.api.interactions.components.buttons.Button;
 import net.dv8tion.jda.api.managers.AudioManager;
 import net.dv8tion.jda.api.requests.CloseCode;
 import net.dv8tion.jda.api.requests.FluentRestAction;
@@ -121,6 +129,9 @@ import net.sybyline.scarlet.util.UniqueStrings;
 import net.sybyline.scarlet.util.VRChatHelpDeskURLs;
 import net.sybyline.scarlet.util.VersionedFile;
 
+import moe.kyokobot.libdave.NativeDaveFactory;
+import moe.kyokobot.libdave.jda.LDJDADaveSessionFactory;
+
 public class ScarletDiscordJDA implements ScarletDiscord
 {
 
@@ -130,43 +141,61 @@ public class ScarletDiscordJDA implements ScarletDiscord
     {
         scarlet.splash.splashSubtext("Configuring Discord");
         this.scarlet = scarlet;
+        this.token = scarlet.settings.new RegistryStringEncrypted("discord.token", true);
         this.discordBotFile = discordBotFile;
         this.audio = new JDAAudioSendingHandler();
-        this.requestingEmail = scarlet.ui.settingString("vrchat_report_email", "VRChat Help Desk report email", "");
-        this.appendTemplateFooter = scarlet.ui.settingBool("vrchat_report_template_footer", "Append footer to template", true);
-        this.bundleModerations_instanceKick2userBan = scarlet.ui.settingBool("discord_bundle_instance_kick_with_user_ban", "Discord: Bundle Instance Kicks with causing User Ban", true);
-        this.moderationSummary_onlyActivity = scarlet.ui.settingBool("moderation_summary_only_activity", "Moderation summary: only list staff with activity", true);
-        this.pingOnModeration_instanceWarn = scarlet.ui.settingBool("discord_ping_instance_warn", "Discord: Ping on Instance Warn", false);
-        this.pingOnModeration_instanceKick = scarlet.ui.settingBool("discord_ping_instance_kick", "Discord: Ping on Instance Kick", false);
-        this.pingOnModeration_memberRemove = scarlet.ui.settingBool("discord_ping_member_remove", "Discord: Ping on Member Remove", true);
-        this.pingOnModeration_userBan = scarlet.ui.settingBool("discord_ping_user_ban", "Discord: Ping on User Ban", true);
-        this.pingOnModeration_userUnban = scarlet.ui.settingBool("discord_ping_user_unban", "Discord: Ping on User Unban", false);
-        this.pingOnOutstandingModeration_instanceWarn = scarlet.ui.settingBool("discord_ping_outstanding_instance_warn", "Discord: Ping on outstanding Instance Warn", false);
-        this.pingOnOutstandingModeration_instanceKick = scarlet.ui.settingBool("discord_ping_outstanding_instance_kick", "Discord: Ping on outstanding Instance Kick", true);
-        this.pingOnOutstandingModeration_memberRemove = scarlet.ui.settingBool("discord_ping_outstanding_member_remove", "Discord: Ping on outstanding Member Remove", false);
-        this.pingOnOutstandingModeration_userBan = scarlet.ui.settingBool("discord_ping_outstanding_user_ban", "Discord: Ping on outstanding User Ban", true);
-        this.pingOnOutstandingModeration_userUnban = scarlet.ui.settingBool("discord_ping_outstanding_user_unban", "Discord: Ping on outstanding User Unban", false);
-        this.vrchatClient_launchOnInstanceCreate = scarlet.ui.settingBool("vrchat_client_launch_on_instance_create", "VRChat Client: Launch on Instance Create", false);
-        this.evidenceEnabled = scarlet.ui.settingBool("evidence_enabled", "Evidence submission", false);
-        this.selectEvidenceRoot = scarlet.ui.settingVoid("Evidence root folder", "Select", this::selectEvidenceRoot);
-        this.evidenceFilePathFormat = scarlet.ui.settingString("evidence_file_path_format", "Evidence file path format", "");
-        this.avatarSearchProvidersEnabled = scarlet.ui.settingBool("custom_avatar_search_providers_enabled", "Use custom avatar search providers", false);
-        this.avatarSearchProviders = scarlet.ui.settingStringArr("custom_avatar_search_providers", "VRCX-compatible avatar search providers", AvatarSearch.URL_ROOTS.clone());
-        this.resetAvatarSearchProviders = scarlet.ui.settingVoid("Reset avatar search providers to default", "Reset", this::resetAvatarSearchProviders);
+        this.requestingEmail = scarlet.settings.new FileValuedStringPattern("vrchat_report_email", "VRChat Help Desk report email", "", ".+@.+", false);
+        this.appendTemplateFooter = scarlet.settings.new FileValuedBoolean("vrchat_report_template_footer", "Append footer to template", true);
+        this.bundleModerations_instanceKick2userBan = scarlet.settings.new FileValuedBoolean("discord_bundle_instance_kick_with_user_ban", "Discord: Bundle Instance Kicks with causing User Ban", true);
+        this.moderationSummary_onlyActivity = scarlet.settings.new FileValuedBoolean("moderation_summary_only_activity", "Moderation summary: only list staff with activity", true);
+        this.pingOnModeration_instanceWarn = scarlet.settings.new FileValuedBoolean("discord_ping_instance_warn", "Discord: Ping on Instance Warn", false);
+        this.pingOnModeration_instanceKick = scarlet.settings.new FileValuedBoolean("discord_ping_instance_kick", "Discord: Ping on Instance Kick", false);
+        this.pingOnModeration_memberRemove = scarlet.settings.new FileValuedBoolean("discord_ping_member_remove", "Discord: Ping on Member Remove", true);
+        this.pingOnModeration_userBan = scarlet.settings.new FileValuedBoolean("discord_ping_user_ban", "Discord: Ping on User Ban", true);
+        this.pingOnModeration_userUnban = scarlet.settings.new FileValuedBoolean("discord_ping_user_unban", "Discord: Ping on User Unban", false);
+        this.pingOnOutstandingModeration_instanceWarn = scarlet.settings.new FileValuedBoolean("discord_ping_outstanding_instance_warn", "Discord: Ping on outstanding Instance Warn", false);
+        this.pingOnOutstandingModeration_instanceKick = scarlet.settings.new FileValuedBoolean("discord_ping_outstanding_instance_kick", "Discord: Ping on outstanding Instance Kick", true);
+        this.pingOnOutstandingModeration_memberRemove = scarlet.settings.new FileValuedBoolean("discord_ping_outstanding_member_remove", "Discord: Ping on outstanding Member Remove", false);
+        this.pingOnOutstandingModeration_userBan = scarlet.settings.new FileValuedBoolean("discord_ping_outstanding_user_ban", "Discord: Ping on outstanding User Ban", true);
+        this.pingOnOutstandingModeration_userUnban = scarlet.settings.new FileValuedBoolean("discord_ping_outstanding_user_unban", "Discord: Ping on outstanding User Unban", false);
+        this.vrchatClient_launchOnInstanceCreate = scarlet.settings.new FileValuedBoolean("vrchat_client_launch_on_instance_create", "VRChat Client: Launch on Instance Create", false);
+        this.evidenceEnabled = scarlet.settings.new FileValuedBoolean("evidence_enabled", "Evidence submission", false);
+        this.selectEvidenceRoot = scarlet.settings.new FileValuedVoid("Evidence root folder", "Select", this::selectEvidenceRoot);
+        this.evidenceFilePathFormat = scarlet.settings.new FileValuedStringPattern("evidence_file_path_format", "Evidence file path format", "", ".+", false);
+        this.avatarSearchProvidersEnabled = scarlet.settings.new FileValuedBoolean("custom_avatar_search_providers_enabled", "Use custom avatar search providers", false);
+        this.avatarSearchProviders = scarlet.settings.new FileValuedStringArrayPattern("custom_avatar_search_providers", "VRCX-compatible avatar search providers", AvatarSearch.URL_ROOTS.clone(), "https?://.+", false);
+        this.resetAvatarSearchProviders = scarlet.settings.new FileValuedVoid("Reset avatar search providers to default", "Reset", this::resetAvatarSearchProviders);
         this.load();
-        JDA jda = null;
-        if (this.token != null && !this.token.trim().isEmpty()) try
+        AudioModuleConfig audioModuleConfig = new AudioModuleConfig();
+        try
         {
+            NativeDaveFactory.ensureAvailable();
+            audioModuleConfig = audioModuleConfig.withDaveSessionFactory(new LDJDADaveSessionFactory(new NativeDaveFactory()));
+            LOG.info("DAVE native library loaded successfully");
+        }
+        catch (RuntimeException rex)
+        {
+            LOG.error("Failed to initialize DAVE native library - E2EE will not be available", rex);
+        }
+        JDA jda = null;
+        String token0 = this.token.getOrNull();
+        if (token0 != null && !token0.isEmpty()) try
+        {
+            
             jda = JDABuilder
-            .createDefault(this.token)
+            .createDefault(token0)
             .enableIntents(GatewayIntent.MESSAGE_CONTENT)
             .addEventListeners(new JDAEvents())
             .enableCache(CacheFlag.VOICE_STATE)
+            .setAudioModuleConfig(audioModuleConfig)
             .build();
         }
         catch (InvalidTokenException|IllegalArgumentException ex)
         {
-            this.scarlet.ui.messageModalAsyncError(null, "You can reset the bot token in the Settings page.", "Invalid bot token");
+            if (this.scarlet.settings.requireConfirmYesNo("You can reset the bot token in the Settings page.", "Invalid bot token"))
+            {
+                ; // noop
+            }
         }
         this.jda = jda;
         this.perms = new DPerms(permsFile);
@@ -202,10 +231,11 @@ public class ScarletDiscordJDA implements ScarletDiscord
     final File discordBotFile;
     final JDAAudioSendingHandler audio;
     final JDA jda;
-    String token, guildSf, audioChannelSf, evidenceRoot;
-    final ScarletUI.Setting<String> requestingEmail,
+    final ScarletSettings.RegistryStringEncrypted token;
+    String guildSf, audioChannelSf, evidenceRoot;
+    final ScarletSettings.FileValued<String> requestingEmail,
                                     evidenceFilePathFormat;
-    final ScarletUI.Setting<Boolean> appendTemplateFooter,
+    final ScarletSettings.FileValued<Boolean> appendTemplateFooter,
                                      bundleModerations_instanceKick2userBan,
                                      moderationSummary_onlyActivity,
                                      pingOnModeration_instanceWarn,
@@ -221,9 +251,9 @@ public class ScarletDiscordJDA implements ScarletDiscord
                                      vrchatClient_launchOnInstanceCreate,
                                      evidenceEnabled,
                                      avatarSearchProvidersEnabled;
-    final ScarletUI.Setting<Void> selectEvidenceRoot,
+    final ScarletSettings.FileValued<Void> selectEvidenceRoot,
                                   resetAvatarSearchProviders;
-    final ScarletUI.Setting<String[]> avatarSearchProviders;
+    final ScarletSettings.FileValued<String[]> avatarSearchProviders;
     final DInteractions interactions;
     final DPerms perms;
     final Map<String, InstanceCreation> instanceCreation = new ConcurrentHashMap<>();
@@ -266,7 +296,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
         }
         catch (Exception ex)
         {
-            if (ex instanceof IllegalStateException && JDA.Status.FAILED_TO_LOGIN == this.jda.getStatus() && "".equals(ScarletDiscordJDA.this.token))
+            if (ex instanceof IllegalStateException && JDA.Status.FAILED_TO_LOGIN == this.jda.getStatus() && "".equals(ScarletDiscordJDA.this.token.getOrNull()))
             {
                 this.setStaffMode();
                 return;
@@ -297,6 +327,20 @@ public class ScarletDiscordJDA implements ScarletDiscord
         this.audio.init();
         this.scarlet.exec.scheduleAtFixedRate(this::clearDeadPagination, 30_000L, 30_000L, TimeUnit.MILLISECONDS);
     }
+    @Deprecated
+    void scheduledEventsTest()
+    {
+        ScarletDiscordJDA
+            .this
+            .jda
+            .getGuildById(this.guildSf)
+//            .getScheduledEvents()
+//            .stream()
+//            .findFirst()
+//            .get()
+            .createScheduledEvent("name", "location", null, null)
+            ;
+    }
 
     @Override
     public void updateCommandList()
@@ -311,7 +355,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 datas,
                 (     data) -> this.jda.upsertCommand(data).queue($ ->                      LOG.info("Upserted "+ $.getType()+" command "+  $.getName())),
                 (cmd      ) -> this.jda.deleteCommandById(cmd.getId()).queue($ ->           LOG.info("Deleted "+cmd.getType()+" command "+cmd.getName())), 
-                (cmd, data) -> this.jda.editCommandById(cmd.getId()).apply(data).queue($ -> LOG.info("Edited "+   $.getType()+" command "+  $.getName())),
+                (cmd, data) -> this.jda.editCommandById(cmd.getType(), cmd.getId()).apply(data).queue($ -> LOG.info("Edited "+   $.getType()+" command "+  $.getName())),
                 (cmd, data) -> {}
             );
             LOG.info("Queued commands update "+datas);
@@ -428,12 +472,12 @@ public class ScarletDiscordJDA implements ScarletDiscord
     {
         LOG.warn("No Discord bot token: entering staff mode");
         this.scarlet.staffMode = true;
-        this.scarlet.ui.jframe.setTitle(Scarlet.NAME+" (staff mode)");
+        this.scarlet.ui.jframe(jframe -> jframe.setTitle(Scarlet.NAME+" (staff mode)"));
     }
 
     void resetAvatarSearchProviders()
     {
-        this.avatarSearchProviders.set(this.avatarSearchProviders.getDefault());
+        this.avatarSearchProviders.set(null, "discord");
     }
 
     String[] getAvatarSearchProviders()
@@ -445,7 +489,18 @@ public class ScarletDiscordJDA implements ScarletDiscord
 
     void selectEvidenceRoot()
     {
-        this.scarlet.execModal.submit(() ->
+        if (GraphicsEnvironment.isHeadless())
+        {
+            this.scarlet.settings.requireInputAsync("Enter new evidence root folder", false, string ->
+            {
+                File file = new File(string);
+                if (file.isDirectory())
+                {
+                    this.evidenceRoot = file.getAbsolutePath();
+                }
+            });
+        }
+        else this.scarlet.execModal.submit(() ->
         {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Select a Folder");
@@ -488,7 +543,15 @@ public class ScarletDiscordJDA implements ScarletDiscord
     @Override
     public boolean submitAudio(File file)
     {
-        return this.audio.submitAudio(file);
+        try
+        {
+            return this.audio.submitAudio(file);
+        }
+        finally
+        {
+            if (file != null && file.isFile() && !file.delete())
+                LOG.warn("TTS failed to delete file after use. file={}", file.toString());
+        }
     }
 
     static final int BYTES_PER_20MS = 3840; // 20ms * (48000 frames/second) * (2 samples/frame) * (2 bytes/sample)
@@ -499,7 +562,11 @@ public class ScarletDiscordJDA implements ScarletDiscord
         {
             AudioManager audioManager = this.audioManager;
             if (audioManager == null || !audioManager.isConnected())
+            {
+                LOG.warn("TTS: Cannot submit audio - AudioManager is null or not connected. audioManager={}, isConnected={}",
+                    audioManager, audioManager != null ? audioManager.isConnected() : "N/A");
                 return false;
+            }
             List<byte[]> buffersToAdd = new ArrayList<>();
             try (InputStream fis = new FileInputStream(file))
             {
@@ -518,19 +585,31 @@ public class ScarletDiscordJDA implements ScarletDiscord
                         }
                         else
                         {
+                            LOG.warn("TTS: Audio format conversion not supported: source={}, target={}", ais.getFormat(), AudioSendHandler.INPUT_FORMAT);
                             return false;
                         }
-                        while (ais0.available() > 0)
+                        // FIX 1: Use read() return value instead of available() to detect EOF.
+                        // available() is unreliable on converted AudioInputStreams and can return 0
+                        // even when data remains, causing the entire audio to be silently skipped.
+                        // FIX 2: Track how many bytes were actually read into each buffer so that
+                        // the last (partial) chunk is zero-padded correctly instead of being
+                        // submitted as a full buffer of uninitialized/garbage bytes.
+                        while (true)
                         {
                             byte[] buffer = new byte[BYTES_PER_20MS];
-                            for
-                            (
-                                int read = ais0.read(buffer),
-                                    total = read;
-                                total < BYTES_PER_20MS && (read = ais0.read(buffer, total, BYTES_PER_20MS - total)) != -1;
-                                total += read
-                            );
+                            int total = 0;
+                            int read;
+                            while (total < BYTES_PER_20MS && (read = ais0.read(buffer, total, BYTES_PER_20MS - total)) != -1)
+                            {
+                                total += read;
+                            }
+                            if (total == 0)
+                                break; // true EOF - no more data
+                            // If total < BYTES_PER_20MS, the buffer is already zero-padded (new byte[])
+                            // so the partial last frame is safe to submit as-is.
                             buffersToAdd.add(buffer);
+                            if (total < BYTES_PER_20MS)
+                                break; // partial read means EOF was reached
                         }
                     }
                     finally
@@ -546,7 +625,11 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 return false;
             }
             if (buffersToAdd.isEmpty())
+            {
+                LOG.warn("TTS: No audio buffers loaded from file: {}", file);
                 return true;
+            }
+            LOG.debug("TTS: Queuing {} audio buffers (~{}ms) from file: {}", buffersToAdd.size(), buffersToAdd.size() * 20, file);
             synchronized (this)
             {
                 this.buffers.addAll(buffersToAdd);
@@ -582,11 +665,14 @@ public class ScarletDiscordJDA implements ScarletDiscord
                    audioChannelSf = ScarletDiscordJDA.this.audioChannelSf;
             Guild guild = ScarletDiscordJDA.this.jda.getGuildById(guildSf);
             AudioManager audioManager = this.audioManager;
+            LOG.info("TTS Audio: updateChannel called - guildSf={}, audioChannelSf={}, audioManager={}, guild={}", 
+                guildSf, audioChannelSf, audioManager != null ? "present" : "null", guild != null ? "found" : "null");
             if (audioChannelSf == null)
             {
                 this.audioChannel = null;
                 if (audioManager != null)
                 {
+                    LOG.info("TTS Audio: Closing audio connection (audioChannelSf is null)");
                     audioManager.closeAudioConnection();
                     this.buffers.clear();
                 }
@@ -595,15 +681,18 @@ public class ScarletDiscordJDA implements ScarletDiscord
             {
                 AudioChannel audioChannel = guild.getVoiceChannelById(audioChannelSf);
                 this.audioChannel = audioChannel;
+                LOG.info("TTS Audio: AudioChannel lookup result - audioChannel={}", audioChannel != null ? audioChannel.getId() : "null");
                 if (audioManager != null)
                 {
                     if (audioChannel != null)
                     {
+                        LOG.info("TTS Audio: Opening audio connection to channel {}", audioChannel.getId());
                         audioManager.openAudioConnection(audioChannel);
                         this.buffers.clear();
                     }
                     else
                     {
+                        LOG.warn("TTS Audio: AudioChannel not found for sf={}, closing connection", audioChannelSf);
                         audioManager.closeAudioConnection();
                         this.buffers.clear();
                     }
@@ -632,8 +721,9 @@ public class ScarletDiscordJDA implements ScarletDiscord
 
     public static class JDASettingsSpec
     {
-        public String token = null,
-                      guildSf = null,
+        @Deprecated
+        public String token = null;
+        public String guildSf = null,
                       audioChannelSf = null,
                       evidenceRoot = null;
         public Map<String, UniqueStrings> scarletPermission2roleSf = new HashMap<>();
@@ -665,35 +755,43 @@ public class ScarletDiscordJDA implements ScarletDiscord
         
         boolean save = false;
         
-        if (spec.token == null)
+        String token0 = spec.token;
+        if (token0 == null)
         {
-            spec.token = this.scarlet.settings.requireInput("Discord bot token (leave empty for staff mode)", true);
-            save = true;
+            token0 = this.token.getOrNull();
+            if (token0 == null)
+            {
+                token0 = this.scarlet.settings.requireInput("Discord bot token (leave empty for staff mode)", true);
+            }
+            else
+            {
+                spec.token = null;
+                save = true;
+            }
         }
-        this.scarlet.ui.settingVoid("Discord bot token", "Reset", () -> this.scarlet.execModal.execute(() ->
-        {
-            if (!this.scarlet.ui.confirmModal(null, "Are you sure you want to reset the bot token?", "Reset bot token"))
-                return;
-            this.token = this.scarlet.settings.requireInput("Discord bot token (leave empty for staff mode)", true);
-            this.save();
-        }));
+        this.scarlet.settings.new FileValuedVoid("Discord bot token", "Reset", () -> 
+            this.scarlet.settings.requireConfirmYesNoAsync("Are you sure you want to reset the bot token?", "Reset bot token", () -> {
+                this.token.set(this.scarlet.settings.requireInput("Discord bot token (leave empty for staff mode)", true));
+                this.save();
+            }, null)
+        );
         
         if (spec.guildSf == null)
         {
             spec.guildSf = this.scarlet.settings.requireInput("Discord guild snowflake (leave empty for staff mode)", false);
             save = true;
         }
-        this.scarlet.ui.settingVoid("Discord guild snowflake", "Reset", () -> this.scarlet.execModal.execute(() ->
-        {
-            if (!this.scarlet.ui.confirmModal(null, "Are you sure you want to reset the guild snowflake?", "Reset guild snowflake"))
-                return;
-            this.guildSf = this.scarlet.settings.requireInput("Discord guild snowflake (leave empty for staff mode)", false);
-            this.save();
-        }));
+        this.scarlet.settings.new FileValuedVoid("Discord guild snowflake", "Reset", () -> 
+            this.scarlet.settings.requireConfirmYesNoAsync("Are you sure you want to reset the guild snowflake?", "Reset guild snowflake", () -> {
+                this.guildSf = this.scarlet.settings.requireInput("Discord guild snowflake (leave empty for staff mode)", false);
+                this.save();
+            }, null)
+        );
         
         if (save) this.save(spec);
         
-        this.token = spec.token;
+        this.token.set(token0);
+//        this.token = spec.token;
         this.guildSf = spec.guildSf;
         this.audioChannelSf = spec.audioChannelSf;
         this.evidenceRoot = spec.evidenceRoot;
@@ -724,7 +822,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
     {
         this.perms.save();
         JDASettingsSpec spec = new JDASettingsSpec();
-        spec.token = this.token;
+//        spec.token = this.token;
         spec.guildSf = this.guildSf;
         spec.audioChannelSf = this.audioChannelSf;
         spec.evidenceRoot = this.evidenceRoot;
@@ -759,7 +857,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
         this.interactions.clearDeadPagination();
     }
 
-    class InstanceCreation
+    static class InstanceCreation
     {
         InstanceCreation(String ictoken, String worldId, String groupId)
         {
@@ -775,12 +873,16 @@ public class ScarletDiscordJDA implements ScarletDiscord
         Boolean queueEnabled = Boolean.TRUE;
         Boolean hardClose = Boolean.FALSE;
         Boolean ageGate = Boolean.FALSE;
+        Boolean inviteOnly = null;
+        Boolean canRequestInvite = null;
         Boolean playerPersistenceEnabled = null;
         Boolean instancePersistenceEnabled = null;
         String displayName = null;
+        String calendarEntryId = null;
         
         boolean contentSettings_drones = true;
         boolean contentSettings_emoji = true;
+        boolean contentSettings_props = true;
         boolean contentSettings_pedestals = true;
         boolean contentSettings_prints = true;
         boolean contentSettings_stickers = true;
@@ -796,12 +898,17 @@ public class ScarletDiscordJDA implements ScarletDiscord
             cir.setClosedAt(this.closedAt);
             cir.setQueueEnabled(this.queueEnabled);
             cir.setHardClose(this.hardClose);
+//            cir.setPlayerPersistenceEnabled(this.playerPersistenceEnabled);
             cir.setInstancePersistenceEnabled(this.instancePersistenceEnabled);
             cir.setDisplayName(this.displayName);
+//            cir.setCalendarEntryId(this.calendarEntryId);
             cir.setAgeGate(this.ageGate);
+            cir.setInviteOnly(this.inviteOnly);
+            cir.setCanRequestInvite(this.canRequestInvite);
             InstanceContentSettings contentSettings = new InstanceContentSettings();
             contentSettings.setDrones(this.contentSettings_drones);
             contentSettings.setEmoji(this.contentSettings_emoji);
+            contentSettings.setProps(this.contentSettings_props);
             contentSettings.setPedestals(this.contentSettings_pedestals);
             contentSettings.setPrints(this.contentSettings_prints);
             contentSettings.setStickers(this.contentSettings_stickers);
@@ -812,6 +919,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
         {
             JsonObject cir = JSON.getGson().toJsonTree(this.createRequest()).getAsJsonObject();
             if (this.playerPersistenceEnabled != null) cir.addProperty("playerPersistenceEnabled", this.playerPersistenceEnabled);
+            if (this.calendarEntryId != null) cir.addProperty("calendarEntryId", this.calendarEntryId);
             return cir;
         }
     }
@@ -974,6 +1082,18 @@ public class ScarletDiscordJDA implements ScarletDiscord
         }
 
     }
+
+    @Override
+    public boolean isEmitting(GroupAuditType auditType)
+    {
+        return this.jda != null && auditType != null && this.auditType2channelSf.get(auditType.id) != null;
+    }
+
+    @Override
+    public boolean isEmitting(GroupAuditTypeEx auditTypeEx)
+    {
+        return this.jda != null && auditTypeEx != null && this.auditExType2channelSf.get(auditTypeEx.id) != null;
+    }
     
     boolean shouldRedact(String infoId, String requesterSf)
     {
@@ -1048,11 +1168,32 @@ public class ScarletDiscordJDA implements ScarletDiscord
         String userId = this.scarlet.data.globalMetadata_getSnowflakeId(member.getId());
         return this.scarlet.vrc.checkUserHasVRChatPermission(vrchatPermission, userId);
     }
+    public boolean checkMemberRespondVrcPerms(GroupPermissions perms, InteractionHook hook, Member member)
+    {
+        if (this.checkMemberHasVRChatPermission(perms, member))
+            return true;
+        hook.sendMessage(this.scarlet.vrc.messageNeedPerms(perms)).setEphemeral(true).queue();
+        return false;
+    }
+    public boolean checkSelfRespondVrcPerms(GroupPermissions perms, InteractionHook hook)
+    {
+        if (this.scarlet.vrc.checkSelfUserHasVRChatPermission(perms))
+            return true;
+        hook.sendMessage(this.scarlet.vrc.messageNeedPerms(perms)).setEphemeral(true).queue();
+        return false;
+    }
+    public boolean checkSelfRespondVrcPerms(GroupPermissions perms, IReplyCallback event)
+    {
+        if (this.scarlet.vrc.checkSelfUserHasVRChatPermission(perms))
+            return true;
+        event.reply(this.scarlet.vrc.messageNeedPerms(perms)).setEphemeral(true).queue();
+        return false;
+    }
 
     public boolean checkMemberHasScarletPermission(ScarletPermission scarletPermission, Member member, boolean fallback)
     {
         if (scarletPermission == null)
-            return true;
+            return fallback;
         return this.perms.check(member, scarletPermission.id, fallback);
     }
 
@@ -1291,9 +1432,13 @@ public class ScarletDiscordJDA implements ScarletDiscord
             
             return message;
         });
-        if ("group.instance.kick".equals(entryMeta.entry.getEventType()))
+        switch (entryMeta.entry.getEventType())
         {
+        case "group.instance.kick":
             this.tryEmitExtendedSuggestedModeration(scarlet, target);
+            // fallthrough
+        case "group.instance.warn":
+            this.tryEmitExtendedWatchedModeration(scarlet, target);
         }
     }
     ThreadChannel emitUserModeration_thread(Scarlet scarlet, ScarletData.AuditEntryMetadata entryMeta, String actorId, Message message)
@@ -1373,17 +1518,23 @@ public class ScarletDiscordJDA implements ScarletDiscord
                     : (entryMeta.hasAuxActor() ? entryMeta.auxActorDisplayName : entryMeta.entry.getActorDisplayName()));
         Message auxMessage = threadChannel.sendMessage(content)
             .addContent(contentExtra)
-            .addActionRow(Button.primary("edit-tags:"+entryMeta.entry.getId(), "Edit tags"),
-                          Button.primary("edit-desc:"+entryMeta.entry.getId(), "Edit description"),
-                          Button.primary("vrchat-report:"+entryMeta.entry.getId()+timeext, "Get report link"))
-            .addActionRow(Button.secondary("view-snapshot-user:"+entryMeta.entry.getId(), "Snapshot: user"),
-                          Button.secondary("view-snapshot-user-groups:"+entryMeta.entry.getId(), "Snapshot: user groups"),
-                          Button.secondary("view-snapshot-user-represented-group:"+entryMeta.entry.getId(), "Snapshot: user represented group"))
-            .addActionRow(Button.danger("vrchat-user-ban:"+entryMeta.entry.getTargetId(), "Ban user"),
-                          Button.success("vrchat-user-unban:"+entryMeta.entry.getTargetId(), "Unban user"),
-//                          Button.secondary("vrchat-user-edit-manager-notes:"+entryMeta.entry.getTargetId(), "Edit manager notes"),
-                          Button.primary("event-redact:"+entryMeta.entry.getId(), "Redact event"),
-                          Button.secondary("event-unredact:"+entryMeta.entry.getId(), "Unredact event"))
+            .addComponents(ActionRow.of(
+                Button.primary("edit-tags:"+entryMeta.entry.getId(), "Edit tags"),
+                Button.primary("edit-desc:"+entryMeta.entry.getId(), "Edit description"),
+                Button.primary("vrchat-report:"+entryMeta.entry.getId()+timeext, "Get report link")
+            ))
+            .addComponents(ActionRow.of(
+                Button.secondary("view-snapshot-user:"+entryMeta.entry.getId(), "Snapshot: user"),
+                Button.secondary("view-snapshot-user-groups:"+entryMeta.entry.getId(), "Snapshot: user groups"),
+                Button.secondary("view-snapshot-user-represented-group:"+entryMeta.entry.getId(), "Snapshot: user represented group")
+            ))
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+entryMeta.entry.getTargetId(), "Ban user"),
+                Button.success("vrchat-user-unban:"+entryMeta.entry.getTargetId(), "Unban user"),
+//                Button.secondary("vrchat-user-edit-manager-notes:"+entryMeta.entry.getTargetId(), "Edit manager notes"),
+                Button.primary("event-redact:"+entryMeta.entry.getId(), "Redact event"),
+                Button.secondary("event-unredact:"+entryMeta.entry.getId(), "Unredact event")
+            ))
             .completeAfter(1500L, TimeUnit.MILLISECONDS);
         
         entryMeta.auxMessageSnowflake = auxMessage.getId();
@@ -1721,6 +1872,10 @@ public class ScarletDiscordJDA implements ScarletDiscord
                     .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                     .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                     .build())
+                .addComponents(ActionRow.of(
+                    Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                    Button.success("vrchat-user-unban:"+userId, "Unban user")
+                ))
                 .complete();
         });
     }
@@ -1740,15 +1895,20 @@ public class ScarletDiscordJDA implements ScarletDiscord
                     .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                     .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                     .build())
+                .addComponents(ActionRow.of(
+                    Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                    Button.success("vrchat-user-unban:"+userId, "Unban user")
+                ))
                 .complete();
         });
     }
 
     @Override
-    public void emitExtendedUserAvatar(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String avatarDisplayName, String[] potentialIds)
+    public void emitExtendedUserAvatar(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String avatarDisplayName, String[] potentialIds0)
     {
         this.condEmitEx(GroupAuditTypeEx.USER_AVATAR, false, false, location, (channelSf, guild, channel) ->
         {
+            String[] potentialIds = potentialIds0;
             EmbedBuilder builder = new EmbedBuilder()
                     .setTitle(MarkdownSanitizer.escape(displayName)+" switched avatars", "https://vrchat.com/home/user/"+userId)
                     .addField("User ID", "`"+userId+"`", false)
@@ -1765,18 +1925,51 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 builder.setThumbnail(aviThumbnail);
             VersionedFile versionedFile = this.avatarName2Bundle.get(avatarDisplayName);
             if (versionedFile != null)
+            {
                 builder.addField("Bundle ID", "`"+versionedFile.id+"`", false);
+                ModelFile modelFile = this.scarlet.vrc.getModelFile(versionedFile.id, ScarletJsonCache.ALWAYS_PREFER_CACHED);
+                if (modelFile != null)
+                {
+                    potentialIds = this.filterAvatarIdsByBundleOwner(modelFile, potentialIds);
+                    builder.setDescription(Arrays.stream(potentialIds).limit(32).collect(Collectors.joining("`\n`", "Potential ids:\n`", "`")));
+                }
+            }
             Message message = channel
                 .sendMessageEmbeds(builder.build())
-                .addActionRow(Button.secondary("view-potential-avatar-matches", "View avatars"))
+                .addComponents(ActionRow.of(
+                    Button.secondary("view-potential-avatar-matches", "View avatars")
+                ))
+                .addComponents(ActionRow.of(
+                    Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                    Button.success("vrchat-user-unban:"+userId, "Unban user")
+                ))
                 .complete();
             if (versionedFile != null)
                 return message;
             List<AviSwitch> list = this.avatarName2Switches.get(avatarDisplayName);
             if (list == null)
                 this.avatarName2Switches.put(avatarDisplayName, list = new ArrayList<>());
-            list.add(new AviSwitch(message, builder));
+            list.add(new AviSwitch(message, builder, potentialIds0));
             return message;
+        });
+    }
+
+    @Override
+    public void emitExtendedUserVideo(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String videoUrl, String videoTitle)
+    {
+        this.condEmitEx(GroupAuditTypeEx.USER_VIDEO, false, false, location, (channelSf, guild, channel) ->
+        {
+            return channel.sendMessageEmbeds(new EmbedBuilder()
+                    .setTitle(MarkdownSanitizer.escape(displayName)+" loaded video", "https://vrchat.com/home/user/"+userId)
+                    .addField("User ID", "`"+userId+"`", false)
+                    .addField("Location", "`"+location+"`", false)
+                    .addField("Video URL", "`"+videoUrl+"`", false)
+                    .addField("Video Title", MarkdownSanitizer.escape(videoTitle), false)
+                    .setColor(GroupAuditTypeEx.USER_VIDEO.color)
+                    .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
+                    .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build())
+                .complete();
         });
     }
 
@@ -1801,8 +1994,10 @@ public class ScarletDiscordJDA implements ScarletDiscord
             }
             return channel.sendMessageEmbeds(builder
                     .build())
-                .addActionRow(Button.danger("vrchat-user-ban:"+userId, "Ban user"),
-                              Button.success("vrchat-user-unban:"+userId, "Unban user"))
+                .addComponents(ActionRow.of(
+                    Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                    Button.success("vrchat-user-unban:"+userId, "Unban user")
+                ))
                 .complete();
         });
     }
@@ -1832,6 +2027,10 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                 .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                 .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                Button.success("vrchat-user-unban:"+userId, "Unban user")
+            ))
             .complete();
         });
     }
@@ -1864,6 +2063,10 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                 .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                 .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                      Button.success("vrchat-user-unban:"+userId, "Unban user")
+            ))
             .complete();
         });
     }
@@ -1888,26 +2091,93 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                 .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                 .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                Button.success("vrchat-user-unban:"+userId, "Unban user")
+            ))
             .complete();
         });
     }
 
+    @Override
+    public void emitExtendedUserSpawnEmoji(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String emojiId, InventoryItem emoji)
+    {
+        this.condEmitEx(GroupAuditTypeEx.SPAWN_EMOJI, false, false, location, (channelSf, guild, channel) ->
+        {
+            String fileId = emoji.getMetadata().getFileId(),
+                   image = emoji.getImageUrl();
+            return channel.sendMessageEmbeds(new EmbedBuilder()
+                .setTitle(MarkdownSanitizer.escape(displayName)+" spawned an emoji", "https://vrchat.com/home/user/"+userId)
+                .addField("User ID", "`"+userId+"`", false)
+                .addField("Location", "`"+location+"`", false)
+                .addField("Emoji ID", "`"+emojiId+"`", false)
+                .addField("File ID", "`"+fileId+"`", false)
+                .addField("Report emoji", MarkdownUtil.maskedLink("link", VRChatHelpDeskURLs.newModerationRequest_account_emoji(this.requestingEmail.get(), userId, "Emoji", emojiId)), false)
+                .setImage(image != null ? image : ("https://api.vrchat.cloud/api/1/file/"+fileId+"/1/file"))
+                .setColor(GroupAuditTypeEx.SPAWN_EMOJI.color)
+                .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
+                .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
+                .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                      Button.success("vrchat-user-unban:"+userId, "Unban user")
+            ))
+            .complete();
+        });
+    }
+
+    @Override
+    public void emitExtendedUserSpawnProp(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String propId, Prop prop)
+    {
+        this.condEmitEx(GroupAuditTypeEx.SPAWN_PROP, false, false, location, (channelSf, guild, channel) ->
+        {
+            return channel.sendMessageEmbeds(new EmbedBuilder()
+                .setTitle(MarkdownSanitizer.escape(displayName)+" spawned a prop", "https://vrchat.com/home/user/"+userId)
+                .addField("User ID", "`"+userId+"`", false)
+                .addField("Location", "`"+location+"`", false)
+                .addField("Prop Author", MarkdownUtil.maskedLink(MarkdownSanitizer.escape(prop.getAuthorName()), "https://vrchat.com/home/user/"+prop.getAuthorId()), false)
+                .addField("Prop ID", "`"+propId+"`", false)
+                .addField("Report prop", MarkdownUtil.maskedLink("link", VRChatHelpDeskURLs.newModerationRequest_account_other(this.requestingEmail.get(), prop.getAuthorId(), "Prop", propId)), false)
+                .setImage(MiscUtils.nonBlankOrNull(prop.getThumbnailImageUrl(), prop.getImageUrl()))
+                .setColor(GroupAuditTypeEx.SPAWN_PROP.color)
+                .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
+                .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
+                .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+userId, "Ban user"),
+                Button.success("vrchat-user-unban:"+userId, "Unban user")
+            ))
+            .complete();
+        });
+    }
+
+    String[] filterAvatarIdsByBundleOwner(ModelFile modelFile, String[] potentialIds)
+    {
+        return Arrays.stream(potentialIds).filter(id ->
+        {
+            Avatar avatar = this.scarlet.vrc.getAvatar(id, ScarletJsonCache.ALWAYS_PREFER_CACHED);
+            return avatar == null || Objects.equals(modelFile.getOwnerId(), avatar.getAuthorId());
+        }).toArray(String[]::new);
+    }
     private final LRUMap<String, VersionedFile> avatarName2Bundle = LRUMap.of();
     private final LRUMap<String, List<AviSwitch>> avatarName2Switches = LRUMap.of();
     class AviSwitch
     {
-        AviSwitch(Message message, EmbedBuilder builder)
+        AviSwitch(Message message, EmbedBuilder builder, String[] potentialIds)
         {
             this.message = message;
             this.builder = builder;
+            this.potentialIds = potentialIds;
         }
         final Message message;
         final EmbedBuilder builder;
-        void update(VersionedFile versionedFile)
+        String[] potentialIds;
+        void update(ModelFile modelFile, VersionedFile versionedFile)
         {
+            this.potentialIds = ScarletDiscordJDA.this.filterAvatarIdsByBundleOwner(modelFile, this.potentialIds);
             try
             {
-                this.message.editMessageEmbeds(this.builder.addField("Bundle ID", "`"+versionedFile.id+"`", false).build()).completeAfter(1_000L, TimeUnit.MILLISECONDS);
+                this.message.editMessageEmbeds(this.builder.setDescription(Arrays.stream(this.potentialIds).limit(32).collect(Collectors.joining("`\n`", "Potential ids:\n`", "`"))).addField("Bundle ID", "`"+versionedFile.id+"`", false).build()).completeAfter(1_000L, TimeUnit.MILLISECONDS);
             }
             catch (RuntimeException rex)
             {
@@ -1916,34 +2186,15 @@ public class ScarletDiscordJDA implements ScarletDiscord
     }
 
     @Override
-    public void tryEmitExtendedAvatarBundles(Scarlet scarlet, LocalDateTime timestamp, String location, String name, VersionedFile file)
+    public void tryEmitExtendedAvatarBundles(Scarlet scarlet, LocalDateTime timestamp, String location, String name, ModelFile modelFile, VersionedFile file)
     {
         this.avatarName2Bundle.put(name, file);
         List<AviSwitch> aviSwitchs = this.avatarName2Switches.remove(name);
         if (aviSwitchs != null)
         {
-            this.scarlet.exec.execute(() -> aviSwitchs.forEach($ -> $.update(file)));
+            this.scarlet.exec.execute(() -> aviSwitchs.forEach($ -> $.update(modelFile, file)));
         }
     }
-
-//    @Override
-//    public void emitExtendedUserSpawnEmoji(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String emojiId)
-//    {
-//        this.condEmitEx(GroupAuditTypeEx.SPAWN_EMOJI, false, false, location, (channelSf, guild, channel) ->
-//        {
-//            return channel.sendMessageEmbeds(new EmbedBuilder()
-//                .setTitle(MarkdownSanitizer.escape(displayName)+" spawned an emoji", "https://vrchat.com/home/user/"+userId)
-//                .addField("User ID", "`"+userId+"`", false)
-//                .addField("Location", "`"+location+"`", false)
-//                .addField("Emoji ID", "`"+emojiId+"`", false)
-//                .setImage(!emojiId.startsWith("file_") ? null : ("https://api.vrchat.cloud/api/1/file/"+emojiId+"/1/file"))
-//                .setColor(GroupAuditTypeEx.SPAWN_EMOJI.color)
-//                .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
-//                .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
-//                .build())
-//            .complete();
-//        });
-//    }
 
     @Override
     public void emitExtendedInstanceMonitor(Scarlet scarlet, String location, InstanceEmbedMessage instanceEmbedMessage)
@@ -1998,9 +2249,27 @@ public class ScarletDiscordJDA implements ScarletDiscord
     }
 
     @Override
+    public void emitExtendedInstanceEnforcement(Scarlet scarlet, String location, String worldName, String reason)
+    {
+        this.condEmitEx(GroupAuditTypeEx.INSTANCE_ENFORCE, false, false, location, (channelSf, guild, channel) ->
+        {
+            return channel.sendMessageEmbeds(new EmbedBuilder()
+                .setTitle("Instance Enforcement")
+                .addField("Location", "`"+location+"`", false)
+                .addField("World", MarkdownSanitizer.sanitize(worldName), false)
+                .addField("Reason", reason, false)
+                .setColor(GroupAuditTypeEx.INSTANCE_ENFORCE.color)
+                .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
+                .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
+                .build())
+            .complete();
+        });
+    }
+
+    @Override
     public void emitModSummary(Scarlet scarlet, OffsetDateTime endOfDay)
     {
-        this.condEmitEx(GroupAuditTypeEx.MOD_SUMMARY, true, false, null, (channelSf, guild, channel) -> this.emitModSummary(scarlet, endOfDay, this.scarlet.settings.heuristicPeriodDays.getOrSupply() * 24L, channel::sendMessageEmbeds));
+        this.condEmitEx(GroupAuditTypeEx.MOD_SUMMARY, true, false, null, (channelSf, guild, channel) -> this.emitModSummary(scarlet, endOfDay, this.scarlet.settings.heuristicPeriodDays.get() * 24L, channel::sendMessageEmbeds));
 
     }
     <MCR extends MessageCreateRequest<MCR> & FluentRestAction<Message, MCR>> Message emitModSummary(Scarlet scarlet, OffsetDateTime endOfDay, long hoursBack, Function<MessageEmbed, MCR> mca)
@@ -2164,7 +2433,7 @@ public class ScarletDiscordJDA implements ScarletDiscord
     @Override
     public void emitOutstandingMod(Scarlet scarlet, OffsetDateTime endOfDay)
     {
-        this.condEmitEx(GroupAuditTypeEx.OUTSTANDING_MODERATION, true, false, null, (channelSf, guild, channel) ->  this.emitOutstandingMod(scarlet, endOfDay, this.scarlet.settings.outstandingPeriodDays.getOrSupply() * 24L, channel::sendMessageEmbeds));
+        this.condEmitEx(GroupAuditTypeEx.OUTSTANDING_MODERATION, true, false, null, (channelSf, guild, channel) ->  this.emitOutstandingMod(scarlet, endOfDay, this.scarlet.settings.outstandingPeriodDays.get() * 24L, channel::sendMessageEmbeds));
     }
     <MCR extends MessageCreateRequest<MCR> & FluentRestAction<Message, MCR>> Message emitOutstandingMod(Scarlet scarlet, OffsetDateTime endOfDay, long hoursBack, Function<MessageEmbed, MCR> mca)
     {
@@ -2255,8 +2524,8 @@ public class ScarletDiscordJDA implements ScarletDiscord
     @Override
     public void tryEmitExtendedSuggestedModeration(Scarlet scarlet, User target)
     {
-        int periodDays = this.scarlet.settings.heuristicPeriodDays.getOrSupply(),
-            kickThreshold = this.scarlet.settings.heuristicKickCount.getOrSupply();
+        int periodDays = this.scarlet.settings.heuristicPeriodDays.get(),
+            kickThreshold = this.scarlet.settings.heuristicKickCount.get();
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC),
                        before = now.minusDays(periodDays);
         List<GroupAuditLogEntry> entries = this.scarlet.vrc.auditQuery(before, now, null, "group.instance.kick", target.getId());
@@ -2284,8 +2553,39 @@ public class ScarletDiscordJDA implements ScarletDiscord
                 .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
                 .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
                 .build())
-            .addActionRow(Button.danger("vrchat-user-ban:"+target.getId(), "Ban user"),
-                          Button.success("vrchat-user-unban:"+target.getId(), "Unban user"))
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+target.getId(), "Ban user"),
+                Button.success("vrchat-user-unban:"+target.getId(), "Unban user")
+            ))
+            .complete();
+        });
+    }
+
+    @Override
+    public void tryEmitExtendedWatchedModeration(Scarlet scarlet, User target)
+    {
+        ScarletWatchedEntities.WatchedEntity watchedPlayer = this.scarlet.watchedUsers.getWatchedEntity(target.getId());
+        if (watchedPlayer == null) return;
+        this.condEmitEx(GroupAuditTypeEx.WATCHED_MODERATION, false, false, null, (channelSf, guild, channel) ->
+        {
+            return channel.sendMessageEmbeds(new EmbedBuilder()
+                .setTitle(MarkdownSanitizer.escape(target.getDisplayName()), "https://vrchat.com/home/user/"+target.getId())
+                .setDescription(watchedPlayer.message)
+                .addField("User ID", "`"+target.getId()+"`", false)
+                .addField("Type", "`"+watchedPlayer.type+"`", false)
+                .addField("Tags", watchedPlayer.tags.stream().map(this.scarlet.moderationTags::getTagLabel).collect(Collectors.joining(", ")), false)
+                .addField("Message", watchedPlayer.message, false)
+                .addField("Critical", "`"+watchedPlayer.critical+"`", true)
+                .addField("Priority", "`"+watchedPlayer.priority+"`", true)
+                .addField("Silent", "`"+watchedPlayer.silent+"`", true)
+                .setColor(GroupAuditTypeEx.WATCHED_MODERATION.color)
+                .setFooter(ScarletDiscord.FOOTER_PREFIX+"Extended event")
+                .setTimestamp(OffsetDateTime.now(ZoneOffset.UTC))
+                .build())
+            .addComponents(ActionRow.of(
+                Button.danger("vrchat-user-ban:"+target.getId(), "Ban user"),
+                Button.success("vrchat-user-unban:"+target.getId(), "Unban user")
+            ))
             .complete();
         });
     }

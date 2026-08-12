@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   scarlet:
     build: .
@@ -7,17 +5,29 @@ services:
     container_name: scarlet
     environment:
       - SCARLET_HOME=/data
-      - SCARLET_HEADLESS=true
-      - JAVA_OPTS=-Xms256m -Xmx512m
     volumes:
       - scarlet-data:/data
+      # These four are bind-mounted as individual FILES. They must already exist
+      # on the host before `up`, or Docker silently creates directories in their
+      # place and the app fails on startup. They are also the only copy of the
+      # bot's token, permission map and state: back up ./configs/ separately.
       - ./configs/settings.json:/data/settings.json
       - ./configs/discord_bot.json:/data/discord_bot.json
       - ./configs/discord_perms.json:/data/discord_perms.json
       - ./configs/store.bin:/data/store.bin
     restart: unless-stopped
+    # Hard ceiling on the container. This host is shared with other services, so
+    # an unbounded JVM here is their outage too. Keep this above the Dockerfile's
+    # -Xmx (non-heap JVM memory lives outside it) and move both together.
+    mem_limit: 1200m
+    # Without this, a crash loop writes an unbounded json-file log until the disk
+    # fills, which turns a bot outage into a host outage.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No ports exposed; the app is client-style
 
 volumes:
   scarlet-data:
-

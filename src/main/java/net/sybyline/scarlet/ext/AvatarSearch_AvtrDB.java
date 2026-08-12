@@ -3,8 +3,9 @@ package net.sybyline.scarlet.ext;
 import java.io.IOException;
 import java.time.OffsetDateTime;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
 import net.sybyline.scarlet.util.HttpURLInputStream;
@@ -17,7 +18,9 @@ public interface AvatarSearch_AvtrDB
 {
 
     public static int MAX_PAGE_SIZE = 50;
+    public static int MAX_BULK_INGEST = 1000;
     public static final String API_ROOT = "https://api.avtrdb.com/v2";
+    public static final String API_ROOT_V3 = "https://api.avtrdb.com/v3";
 
     public static class StatisticsResponse
     {
@@ -118,10 +121,16 @@ public interface AvatarSearch_AvtrDB
     {
         public long valid_avatar_ids;
     }
+    public static class IngestResponseV3
+    {
+        public long avatars_enqueued;
+        public long invalid_ids;
+        public String ticket;
+    }
 
     static Long index()
     {
-        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/index"))
+        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/index", ExtendedUserAgent.init_conn))
         {
             return in.readAsJson(null, null, JsonPrimitive.class).getAsLong();
         }
@@ -134,7 +143,7 @@ public interface AvatarSearch_AvtrDB
 
     static StatisticsResponse statistics()
     {
-        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/statistics"))
+        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/statistics", ExtendedUserAgent.init_conn))
         {
             return in.readAsJson(null, null, StatisticsResponse.class);
         }
@@ -147,7 +156,7 @@ public interface AvatarSearch_AvtrDB
 
     static AvtrDBAvatar[] latest(boolean explicit)
     {
-        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/latest?explicit="+explicit))
+        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+"/avatar/latest?explicit="+explicit, ExtendedUserAgent.init_conn))
         {
             return in.readAsJson(null, null, AvtrDBAvatar[].class);
         }
@@ -160,7 +169,7 @@ public interface AvatarSearch_AvtrDB
 
     static SearchResponse search(int page_size, int page, String query)
     {
-        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+String.format("/avatar/search?page_size=%d&page=%d&query=%s", page_size, page, URLs.encode(query))))
+        try (HttpURLInputStream in = HttpURLInputStream.get(API_ROOT+String.format("/avatar/search?page_size=%d&page=%d&query=%s", page_size, page, URLs.encode(query)), ExtendedUserAgent.init_conn))
         {
             return in.readAsJson(null, null, SearchResponse.class);
         }
@@ -173,7 +182,7 @@ public interface AvatarSearch_AvtrDB
 
     static RefetchResponse request_refetch(String avatar_id, String token)
     {
-        try (HttpURLInputStream in = HttpURLInputStream.post(API_ROOT+"/avatar/request_refetch", HttpURLInputStream.writeAsJson(null, null, RefetchRequest.class, new RefetchRequest(avatar_id, token))))
+        try (HttpURLInputStream in = HttpURLInputStream.post(API_ROOT+"/avatar/request_refetch", ExtendedUserAgent.init_conn_json, HttpURLInputStream.writeAsJson(null, null, RefetchRequest.class, new RefetchRequest(avatar_id, token))))
         {
             return in.readAsJson(null, null, RefetchResponse.class);
         }
@@ -186,9 +195,22 @@ public interface AvatarSearch_AvtrDB
 
     static IngestResponse request_ingest(String[] avatar_ids, String attribution)
     {
-        try (HttpURLInputStream in = HttpURLInputStream.post(API_ROOT+"/avatar/ingest", HttpURLInputStream.writeAsJson(null, null, IngestRequest.class, new IngestRequest(avatar_ids, attribution))))
+        try (HttpURLInputStream in = HttpURLInputStream.post(API_ROOT+"/avatar/ingest", ExtendedUserAgent.init_conn_json, HttpURLInputStream.writeAsJson(null, null, IngestRequest.class, new IngestRequest(avatar_ids, attribution))))
         {
             return in.readAsJson(null, null, IngestResponse.class);
+        }
+        catch (IOException ioex)
+        {
+            ioex.printStackTrace();
+            return null;
+        }
+    }
+
+    static IngestResponseV3 request_ingest_v3(String[] avatar_ids, String attribution)
+    {
+        try (HttpURLInputStream in = HttpURLInputStream.post(API_ROOT_V3+"/avatar/ingest", ExtendedUserAgent.init_conn_json, HttpURLInputStream.writeAsJson(null, null, IngestRequest.class, new IngestRequest(avatar_ids, attribution))))
+        {
+            return in.readAsJson(null, null, IngestResponseV3.class);
         }
         catch (IOException ioex)
         {

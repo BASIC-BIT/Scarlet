@@ -15,15 +15,15 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.vrchatapi.model.Group;
 
 import net.dv8tion.jda.api.EmbedBuilder;
+import net.dv8tion.jda.api.utils.MarkdownSanitizer;
 import net.sybyline.scarlet.server.discord.DEnum;
+import net.sybyline.scarlet.util.CsvRecord;
 import net.sybyline.scarlet.util.UniqueStrings;
 
 public class ScarletWatchedGroups
@@ -78,28 +78,30 @@ public class ScarletWatchedGroups
         public boolean critical = false;
         public boolean silent = false;
         public String message = null;
+        public String notes = null;
         
         public EmbedBuilder embed(Group group)
         {
             String code = group != null ? (group.getShortCode()+"."+group.getDiscriminator()) : null,
                    icon = group != null ? group.getIconUrl() : null,
-                   name = group != null ? group.getName() : this.id,
+                   name = group != null ? MarkdownSanitizer.escape(group.getName()) : this.id,
                    thumbnail = group != null ? group.getBannerUrl() : "https://assets.vrchat.com/www/groups/default_banner.png";
             return new EmbedBuilder()
                 .setAuthor(code, null, icon)
                 .setTitle(name, "https://vrchat.com/home/group/"+this.id)
                 .setThumbnail(thumbnail)
                 .addField("Id", "`"+this.id+"`", false)
-                .addField("Watch type", this.type == null ? "none" : ("`"+this.type.name()+"`"), false)
-                .addField("Priority", "`"+this.priority+"`", false)
-                .addField("Critical", this.critical ? "`true`" : "`false`", false)
-                .addField("Silent", this.silent ? "`true`" : "`false`", false)
-                .addField("Message", this.message == null ? "none" : ("`"+this.message+"`"), false)
-                .addField("Tags", this.tags.isEmpty() ? "none" : this.tags
+                .addField("Watch type", this.type == null ? "`none`" : this.type.name(), false)
+                .addField("Priority", "`"+this.priority+"`", true)
+                .addField("Critical", this.critical ? "`true`" : "`false`", true)
+                .addField("Silent", this.silent ? "`true`" : "`false`", true)
+                .addField("Message", this.message == null ? "`none`" : this.message, false)
+                .addField("Tags", this.tags.isEmpty() ? "`none`" : this.tags
                     .strings()
                     .stream()
                     .filter(Objects::nonNull)
-                    .collect(Collectors.joining("`, `", "`", "`")), false)
+                    .collect(Collectors.joining(", ")), false)
+                .addField("Notes", this.notes == null ? "`none`" : this.notes, false)
             ;
         }
 
@@ -151,11 +153,10 @@ public class ScarletWatchedGroups
         
     }
 
-    @SuppressWarnings("resource")
     public boolean importLegacyCSV(Reader reader, boolean overwrite) throws IOException
     {
         List<WatchedGroup> importedWatchedGroups = new ArrayList<>();
-        for (CSVRecord record : CSVFormat.EXCEL.parse(reader))
+        for (CsvRecord record : CsvRecord.parseDocument(reader))
         {
             WatchedGroup watchedGroup = new WatchedGroup();
             watchedGroup.id = record.get(0);
@@ -167,13 +168,13 @@ public class ScarletWatchedGroups
             case "PARTNER": watchedGroup.type = WatchedGroup.Type.AFFILIATED; break;
             default:        watchedGroup.type = WatchedGroup.Type.OTHER;      break;
             }
-            
+
             Arrays
                 .stream(record.get(5).split("[,;/\\|]"))
                 .filter($ -> !$.isEmpty())
                 .map(String::toLowerCase)
                 .forEach(watchedGroup.tags.strings()::add);
-            watchedGroup.critical = Boolean.parseBoolean(record.get(3));
+            watchedGroup.critical = record.getBoolean(3);
             watchedGroup.message = record.get(4);
             importedWatchedGroups.add(watchedGroup);
         }

@@ -13,7 +13,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.vrchatapi.model.GroupAuditLogEntry;
+import io.github.vrchatapi.model.InventoryItem;
+import io.github.vrchatapi.model.ModelFile;
 import io.github.vrchatapi.model.Print;
+import io.github.vrchatapi.model.Prop;
 import io.github.vrchatapi.model.User;
 
 import net.sybyline.scarlet.util.VersionedFile;
@@ -32,11 +35,17 @@ public interface ScarletDiscord extends Closeable
 
     public boolean submitAudio(File file);
 
+    public boolean isEmitting(GroupAuditType auditType);
+
+    public boolean isEmitting(GroupAuditTypeEx auditTypeEx);
+
     public default void process(Scarlet scarlet, GroupAuditLogEntry entry)
     {
         GroupAuditType latype = GroupAuditType.of(entry.getEventType());
         if (latype == null)
             return;
+        if (scarlet.data.auditEntryMetadataExists(entry.getId()))
+            return; // Avoid logging events duplicated by the new
         ScarletData.AuditEntryMetadata entryMeta = new ScarletData.AuditEntryMetadata();
         entryMeta.entry = entry;
         if (entry.getActorDisplayName() == null)
@@ -415,14 +424,18 @@ public interface ScarletDiscord extends Closeable
     public void emitExtendedUserJoin(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName);
     public void emitExtendedUserLeave(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName);
     public void emitExtendedUserAvatar(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String avatarDisplayName, String[] potentialIds);
+    public void emitExtendedUserVideo(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String videoUrl, String videoTitle);
     public void emitExtendedVtkInitiated(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String optActorId, String optActorDisplayName);
     public void emitExtendedUserSpawnPedestal(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String contentType, String contentId);
     public void emitExtendedUserSpawnSticker(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String stickerId);
     public void emitExtendedUserSpawnPrint(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String printId, Print print);
-//    public void emitExtendedUserSpawnEmoji(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String emojiId);
-    public void tryEmitExtendedAvatarBundles(Scarlet scarlet, LocalDateTime timestamp, String location, String name, VersionedFile file);
+    public void emitExtendedUserSpawnEmoji(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String emojiId, InventoryItem emoji);
+    public void emitExtendedUserSpawnProp(Scarlet scarlet, LocalDateTime timestamp, String location, String userId, String displayName, String propId, Prop prop);
+    public void tryEmitExtendedAvatarBundles(Scarlet scarlet, LocalDateTime timestamp, String location, String name, ModelFile modelFile, VersionedFile file);
     public void emitExtendedInstanceMonitor(Scarlet scarlet, String location, ScarletData.InstanceEmbedMessage instanceEmbedMessage);
+    public void emitExtendedInstanceEnforcement(Scarlet scarlet, String location, String worldName, String reason);
     public void tryEmitExtendedSuggestedModeration(Scarlet scarlet, User target);
+    public void tryEmitExtendedWatchedModeration(Scarlet scarlet, User target);
     public void emitModSummary(Scarlet scarlet, OffsetDateTime endOfDay);
     public void emitOutstandingMod(Scarlet scarlet, OffsetDateTime endOfDay);
     public void emitActionFailure(Scarlet scarlet, Action action, String format, Object... args);
