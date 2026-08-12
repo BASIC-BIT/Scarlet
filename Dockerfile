@@ -5,7 +5,18 @@ FROM maven:3.9.8-eclipse-temurin-8 AS build
 WORKDIR /workspace
 COPY pom.xml .
 COPY src ./src
-RUN mvn -B -DskipTests package
+# -Dnanohttpd.version overrides the pom's 2.3.2-SNAPSHOT. Those snapshots only
+# ever lived on oss.sonatype.org, which has since been retired, so the build no
+# longer resolves them from anywhere. This is not new to the upstream sync: the
+# same deps are in 0.4.12-rc6, which means the previously deployed image could
+# not be rebuilt from source either.
+#
+# They are test-scoped experiments (nanohttpd, jcef, selenium) that this image
+# never runs, but -DskipTests does not help: Maven resolves the test classpath
+# before the skip is evaluated. Overriding the property to a real released
+# version satisfies resolution without patching the pom, which keeps the source
+# tree identical to upstream.
+RUN mvn -B -DskipTests -Dnanohttpd.version=2.3.1 package
 
 # Stage 2: Runtime image (Java 8 JRE)
 FROM eclipse-temurin:8-jre
