@@ -17,9 +17,10 @@ services:
       - ./configs/store.bin:/data/store.bin
     restart: unless-stopped
     # Hard ceiling on the container. This host is shared with other services, so
-    # an unbounded JVM here is their outage too. Keep this above the Dockerfile's
-    # -Xmx (non-heap JVM memory lives outside it) and move both together.
-    mem_limit: 1200m
+    # an unbounded JVM here is their outage too: the old flags let the heap alone
+    # reach ~1960 MB on a 3.9 GB box. Keep this above the Dockerfile's -Xmx,
+    # since non-heap JVM memory lives outside it, and move both together.
+    mem_limit: 1536m
     # Without this, a crash loop writes an unbounded json-file log until the disk
     # fills, which turns a bot outage into a host outage.
     logging:

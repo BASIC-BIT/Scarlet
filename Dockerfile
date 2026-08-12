@@ -26,13 +26,19 @@ COPY --from=build /workspace/target/scarlet-*.jar /app/scarlet.jar
 # desktop code paths and dies on the first dialog.
 #
 # The heap is set explicitly rather than by percentage. It replaces
-# -XX:+UseCGroupMemoryLimitForHeap -XX:MaxRAMFraction=2, which was a cgroup-v1
-# only flag pair that any cgroup-v2 host silently ignored. 900m sits just under
-# the compose mem_limit and roughly matches the default this container actually
-# ran with before (a quarter of a 3.9 GB host), so it bounds the heap without
-# shrinking it. Raise both together if the bot starts hitting OutOfMemoryError.
+# -XX:+UseCGroupMemoryLimitForHeap -XX:MaxRAMFraction=2, a cgroup-v1 only flag
+# pair that a cgroup-v2 host ignores. The JVM says so itself on every start:
+#   Unable to open cgroup memory limit file /sys/fs/cgroup/memory/memory.limit_in_bytes
+# so MaxRAMFraction=2 fell through to physical RAM. Measured on the deployment
+# host, that gave MaxHeapSize = 2055208960, i.e. ~1960 MB, half of a 3.9 GB box
+# shared with other services.
+#
+# 1024m is a first bounded value, not a tuned one: there is no usage data for
+# this app, so it is set generously to avoid trading an unbounded heap for a new
+# OutOfMemoryError. Tune it with `docker stats scarlet` once it has run a while,
+# and move it and the compose mem_limit together.
 ENV SCARLET_HOME=/data \
-    JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Xms256m -Xmx900m"
+    JAVA_TOOL_OPTIONS="-Djava.awt.headless=true -Xms256m -Xmx1024m"
 
 # Pre-create data dir (volume will mount over it at runtime)
 RUN mkdir -p /data
