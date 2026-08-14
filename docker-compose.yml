@@ -7,6 +7,19 @@ services:
       - SCARLET_HOME=/data
     volumes:
       - scarlet-data:/data
+      # 0.4.16 moved the Discord token out of discord_bot.json and into an
+      # encrypted registry backed by java.util.prefs, which lands in
+      # ~/.java/.userPrefs. That is the container's writable layer, not a volume,
+      # so `compose up -d` destroys it on every recreate.
+      #
+      # Worse, the migration is one-way: load() reads the token from the legacy
+      # JSON and the save path that used to write it back is commented out, so
+      # the first run consumes the token, erases it from the JSON, and stores it
+      # somewhere that does not survive. The next recreate then prompts for a
+      # token on a stdin that does not exist, and exits non-zero forever.
+      #
+      # Persisting this directory is what makes the token survive.
+      - scarlet-prefs:/root/.java
       # These four are bind-mounted as individual FILES. They must already exist
       # on the host before `up`, or Docker silently creates directories in their
       # place and the app fails on startup. They are also the only copy of the
@@ -40,3 +53,4 @@ services:
 
 volumes:
   scarlet-data:
+  scarlet-prefs:
