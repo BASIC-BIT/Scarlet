@@ -16,7 +16,16 @@ COPY src ./src
 # before the skip is evaluated. Overriding the property to a real released
 # version satisfies resolution without patching the pom, which keeps the source
 # tree identical to upstream.
-RUN mvn -B -DskipTests -Dnanohttpd.version=2.3.1 package
+# -Dvrchatapi.version bumps the generated VRChat API client from 1.20.8-nightly.8
+# to 1.20.9-nightly.5. VRChat added a group permission the pinned client's enum
+# does not know, and the client throws rather than ignoring it:
+#
+#   java.lang.IllegalArgumentException: Unexpected value 'group-instance-announcement-create'
+#       at io.github.vrchatapi.model.GroupPermissions.fromValue(GroupPermissions.java:104)
+#
+# That kills VRChat login outright, which is what actually took this bot down.
+# 1.20.9-nightly.5 is the first tag containing the value.
+RUN mvn -B -DskipTests -Dnanohttpd.version=2.3.1 -Dvrchatapi.version=1.20.9-nightly.5 package
 
 # Stage 2: Runtime image (Java 8 JRE)
 FROM eclipse-temurin:8-jre
