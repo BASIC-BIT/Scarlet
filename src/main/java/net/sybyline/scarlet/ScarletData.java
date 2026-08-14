@@ -177,6 +177,10 @@ public class ScarletData
             return targetFile.isFile() && condition.test(targetFile);
         });
     }
+    <T> boolean existsSub(String kind, String id)
+    {
+        return new File(new File(this.dir, kind), id).isFile();
+    }
     <T> T readSub(String kind, String id, Class<T> type)
     {
         return this.readSub(kind, id, type, false);
@@ -585,6 +589,10 @@ public class ScarletData
     {
         return this.readSub("gaud", auditEntryId, AuditEntryMetadata.class);
     }
+    public boolean auditEntryMetadataExists(String auditEntryId)
+    {
+        return this.existsSub("gaud", auditEntryId);
+    }
     public void auditEntryMetadata(String auditEntryId, AuditEntryMetadata auditEntryMetadata)
     {
         this.writeSub("gaud", auditEntryId, AuditEntryMetadata.class, auditEntryMetadata);
@@ -599,6 +607,16 @@ public class ScarletData
         if (auditEntryMeta == null)
             auditEntryMeta = new ScarletData.AuditEntryMetadata();
         auditEntryMeta.entryTags.clear().addAll(entryTags);
+        this.auditEntryMetadata(auditEntryId, auditEntryMeta);
+        return auditEntryMeta;
+    }
+    public ScarletData.AuditEntryMetadata auditEntryMetadata_editTags(String auditEntryId, String[] entryTagsRemove, String[] entryTagsAdd)
+    {
+        ScarletData.AuditEntryMetadata auditEntryMeta = this.auditEntryMetadata(auditEntryId);
+        if (auditEntryMeta == null)
+            auditEntryMeta = new ScarletData.AuditEntryMetadata();
+        auditEntryMeta.entryTags.removeAll(entryTagsRemove);
+        auditEntryMeta.entryTags.addAll(entryTagsAdd);
         this.auditEntryMetadata(auditEntryId, auditEntryMeta);
         return auditEntryMeta;
     }

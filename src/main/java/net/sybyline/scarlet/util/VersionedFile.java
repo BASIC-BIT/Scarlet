@@ -11,7 +11,7 @@ import io.github.vrchatapi.model.ModelFile;
 public class VersionedFile
 {
 
-    static final Pattern pattern = Pattern.compile("(?<id>file_\\w{8}-\\w{4}-\\w{4}-\\w{4}-\\w{12})[/:](?<version>\\d+)([/:](?<qualifier>[\\-\\?\\&\\/\\w]))?");
+    static final Pattern pattern = Pattern.compile("(?<id>file_\\w{8}-\\w{4}-\\w{4}-\\w{4}-\\w{12})[/:](?<version>-?\\d+)([/:](?<qualifier>[\\-\\?\\&\\/\\w]+))?");
     public static final int DEFAULT_FILE_VERSION = 1;
 
     public static VersionedFile parse(String string)
@@ -145,9 +145,11 @@ public class VersionedFile
     public enum Kind
     {
         WORLD(),
+        PROP(),
         AVATAR(),
         
         WORLD_IMAGE(),
+        PROP_IMAGE(),
         AVATAR_IMAGE(),
         
         GALLERY(),
@@ -170,12 +172,14 @@ public class VersionedFile
             switch (ext)
             {
             case ".vrcw": return WORLD;
+            case ".vrcp": return PROP;
             case ".vrca": return AVATAR;
             default: break; // fall through
             }
             switch (mime)
             {
             case APPLICATION_X_WORLD: return WORLD;
+            case APPLICATION_X_PROP: return PROP;
             case APPLICATION_X_AVATAR: return AVATAR;
             default: break; // fall through
             }
@@ -192,6 +196,14 @@ public class VersionedFile
                         {
                         case "Asset bundle": return WORLD;
                         case "Image": return WORLD_IMAGE;
+                        default: break; // fall through
+                        }
+                    break;
+                    case "Prop":
+                        switch (type)
+                        {
+                        case "Asset bundle": return PROP;
+                        case "Image": return PROP_IMAGE;
                         default: break; // fall through
                         }
                     break;

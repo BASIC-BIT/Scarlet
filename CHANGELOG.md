@@ -7,6 +7,115 @@
   - Pending: Limited Google Drive interoperability
   - Pending: Distinct Server and Client modes
 
+## 0.4.16-b5
+  - Fixed group logins not working correctly (contributed by EternalModz)
+  - Fixed User Spawn Prop extended event failing to be detected due to a log file format change
+  - Added support for ProTV asset (https://protv.dev/) log entries for detecting video loads
+  - Added Giphy support for GIF url resolution
+  - Added Instance Update audit event
+
+## 0.4.16-b4 (no builds)
+  - Fixed crash on startup due to an unrecognized group permission
+  - Fixed inconsistent csv parsing
+  - Cleaned up dependencies
+  - Changed DAVE implementation to libdave-jvm
+  - Added checks for deadlocks during initialization
+
+## 0.4.16-b3 (KozyBlake)
+  - Fixed repeated TTS announcements on startup
+  - Fixed TTS clips overlapping/playing simultaneously (reported by user ChanAurora)
+  - Fixed UI crash when clicking "View" on a player with no avatar info loaded
+  - Fixed non-Windows TTS in general
+  - Fixed Linux launch/steam folder compatibility
+  - Added installation prompt for eSpeak if not installed
+  - Added asynchronous initialization of encrypted preferences
+  - Added button to reset VRChat credentials
+  - Probably more
+
+## 0.4.16-b2 (no builds)
+  - Added scraping for the Amplitude analytics file
+  - Added avatar id ingestion for some search providers
+
+## 0.4.16-b1
+  - Added (very WIP) support for the new DAVE system (voice channel encryption)
+  - Added TTS support for eSpeak on Linux (credit to 0xkubectl and KozyBlake for downstream implementation reference)
+  - Added informational link to the [NaturalVoiceSAPIAdapter](https://github.com/gexgd0419/NaturalVoiceSAPIAdapter) project, which Scarlet can take advantage of on Windows
+  - Changed TTS support on Windows to use COM/SAPI5 instead of spawning a PowerShell process
+  - Changed handling of User Switch Avatar extended event to only search for matches if the event will be logged in Discord
+  - Changed User-Agent sent to VRCX avatar search providers to include requester ID (requested by a provider in effort to prevent unnecessary load)
+  - Bump dependency `vrchatapi`: 1.20.4 -> 1.20.8-nightly.8
+  - Bump dependency `jda`: 6.1.0 -> 6.3.0
+  - Bump dependency `jna`: 4.4.0 -> 5.18.1
+
+## 0.4.15
+  - Added proper handling of headless environments (currently no way to print Instance UI to terminal)
+  - Added credits button
+  - Fixed audit events possibly being skipped due to clock drift
+
+## 0.4.15-rc5
+  - Added `/schedule` Discord slash command to edit general settings. This is part of a move toward having full (desktop-)headless support.
+  - Fixed alt accounts causing nonexistant class to be loaded
+  - Fixed bug with `tts_announce_new_players` setting being overwritten by `tts_announce_votes_to_kick`
+
+## 0.4.15-rc4
+  - Added optional use of alternate credentials for checking watched groups
+  - Added check to eliminate unnecessary avatar file analysis data retrieval on initial startup
+  - Added encryption for certain sensitive data, such as passwords and tokens. Specify the encrypt/decrypt password by either setting the environment variable `SCARLET_GLOBAL_PW` or the Java system property `scarlet.global.pw`.
+  - Added more abilities and subcommands for scheduling events
+  - Fixed obtrusive problems with events being scheduled
+
+## 0.4.15-rc3
+  - Added (very WIP) event scheduling
+  - Added `/schedule` Discord slash command to view and modify scheduled events
+  - Fixed bug preventing new entries in string list settings
+  - Fixed bug displaying incorrect feedback when removing aux webhooks via Discord slash command
+
+## 0.4.15-rc2
+  - Added Instance Enforcement extended event
+  - Added setting to optionally white/blacklist for worlds permissible for group instances
+  - Added setting to optionally require group instances to be always/never age gated
+  - Added `report-template` subcommand to the `config-set` Discord slash command to view and update the report template file
+  - Added button to view user current avatar stats to Instance UI
+  - Fixed user current avatar performance ignoring variants in all cases
+
+## 0.4.15-rc1
+  - Fixed user current avatar performance updating in only one case
+
+## 0.4.14
+  - Added user current avatar performance to Instance UI
+  - Updated WorldBalancer request paths
+  - Fixed deserialization error during authentication (temporary)
+
+## 0.4.13
+  - Bump dependency `vrchatapi`: 1.20.1 -> 1.20.4
+  - Bump dependency `jda`: 5.6.1 -> 6.1.0
+
+## 0.4.12
+  - Added User Spawn Prop extended event
+  - Added notes field for watched entities and groups
+  - Added autocomplete for watched entity and group ids
+  - Added filter to narrow potential avatars based on author id
+  - Updated JDA to 5.6.1 (was 5.2.1)
+  - Fixed custom Emojis not being properly detected
+  - Fixed some text not being sanitized for Markdown
+  - Fixed some events not firing on player joins
+  - Fixed watched entities not loading or importing
+  - Fixed watched users commands failing and having incorrect links
+
+## 0.4.12-rc8
+  - Fixed error in output for banning or unbanning multiple users with the appropriate Discord command
+  - Fixed error when custom moderation tags is exactly a multiple of 25
+
+## 0.4.12-rc7
+  - Added User Spawn Emoji and Watched Moderation extended events
+  - Added Ban User and Unban User buttons to several event embeds (User Switch Avatar, User Spawn Pedestal/Sticker/Print/Emoji)
+  - Added Watched Users and Watched Avatars
+  - Added user current avatar name to Instance UI
+  - Changed maxium number of custom moderation tags to 125 (was 25)
+  - Fixed watched entity imports via Discord command using the incorrect option name
+  - Fixed mislabeled Discord command descriptions
+  - Fixed silenced watched groups overriding TTS messages for lower priority groups
+
 ## 0.4.12-rc6
   - Added links to the Sybyline Network VRChat Group
   - Added Group Invites created to Moderation Summary

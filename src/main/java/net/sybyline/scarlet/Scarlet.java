@@ -10,7 +10,11 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -25,50 +29,45 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-
-import javax.swing.JOptionPane;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import org.scalasbt.ipcsocket.UnixDomainServerSocket;
-import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
-import org.scalasbt.ipcsocket.Win32SecurityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
+import io.github.vrchatapi.model.Avatar;
 import io.github.vrchatapi.model.GroupAuditLogEntry;
 import io.github.vrchatapi.model.GroupInstance;
 import io.github.vrchatapi.model.GroupPermissions;
 import io.github.vrchatapi.model.User;
 
 import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import net.dv8tion.jda.api.utils.MarkdownSanitizer;
 import net.sybyline.scarlet.log.ScarletLogger;
 import net.sybyline.scarlet.ui.Swing;
 import net.sybyline.scarlet.util.GithubApi;
 import net.sybyline.scarlet.util.HttpURLInputStream;
 import net.sybyline.scarlet.util.JsonAdapters;
+import net.sybyline.scarlet.util.Location;
 import net.sybyline.scarlet.util.MavenDepsLoader;
 import net.sybyline.scarlet.util.MiscUtils;
 import net.sybyline.scarlet.util.Platform;
 import net.sybyline.scarlet.util.ProcLock;
-import net.sybyline.scarlet.util.TTSService;
 import net.sybyline.scarlet.util.VrcIds;
+import net.sybyline.scarlet.util.tts.TtsService;
+import net.sybyline.scarlet.util.EnforcementAgeState;
+import net.sybyline.scarlet.util.EnforcementListState;
 
 public class Scarlet implements Closeable
 {
 
-    public static final boolean HEADLESS;
-    static {
-        String headless = System.getProperty("SCARLET_HEADLESS", System.getenv("SCARLET_HEADLESS"));
-        boolean jreHeadless = Boolean.getBoolean("java.awt.headless");
-        HEADLESS = (headless != null && headless.equalsIgnoreCase("true")) || jreHeadless;
-        if (HEADLESS)
-            System.setProperty("java.awt.headless", "true");
-    }
-
     public static final int JVM_DATA_MODEL;
     public static final int JAVA_SPEC;
+    public static final boolean IS_DEV_ENV;
 
     static
     {
@@ -85,12 +84,25 @@ public class Scarlet implements Closeable
         else if (!"1.8".equals(javaVersion))
             System.err.println("Compiled on Java 8, running on Java "+javaVersion);
         JAVA_SPEC = javaVersion == null ? 0 : Integer.parseInt(javaVersion.startsWith("1.") ? javaVersion.substring(2) : javaVersion);
+        
+        IS_DEV_ENV =
+            Boolean.getBoolean("IS_DEV_ENV")
+            &&
+            Stream.of(System.getProperty("java.class.path")
+                .split(Pattern.quote(System.getProperty("path.separator"))))
+                .map(String::trim)
+                .filter($->!$.isEmpty())
+                .map(File::new)
+                .anyMatch(File::isDirectory)
+//            &&
+//            MavenDepsLoader.jarPath() == null
+            ;
     }
 
     public static final String
         GROUP = "SybylineNetwork",
         NAME = "Scarlet",
-        VERSION = "0.4.12-rc6",
+        VERSION = "0.4.16-b5",
         DEV_DISCORD = "Discord:@vinyarion/Vinyarion#0292/393412191547555841",
         SCARLET_DISCORD_URL = "https://discord.gg/CP3AyhypBF",
         GITHUB_URL = "https://github.com/"+GROUP+"/"+NAME,
@@ -103,6 +115,9 @@ public class Scarlet implements Closeable
         USER_AGENT = USER_AGENT_NAME+"/"+VERSION+" "+DEV_DISCORD+"; "+SCARLET_DISCORD_URL+"; "+GITHUB_URL,
         LICENSE_URL = GITHUB_URL+"?tab=MIT-1-ov-file",
         META_URL = GITHUB_URL+"/blob/main/meta.json?raw=true",
+        
+        COMMUNITY_URL = "https://vrchat.community/",
+        COMMUNITY_GITHUB_URL = "https://github.com/vrchatapi",
         
         API_VERSION = "api/1",
         API_HOST_0 = "vrchat.com",
@@ -143,17 +158,56 @@ public class Scarlet implements Closeable
     static
     {
         String scarletHome = System.getenv("SCARLET_HOME"),
-               localappdata =  System.getenv("LOCALAPPDATA");
+               localappdata = System.getenv("LOCALAPPDATA"),
+               xdgDataHome = System.getenv("XDG_DATA_HOME");
         scarletHome = System.getProperty("SCARLET_HOME", scarletHome);
-        File dir0 = scarletHome != null
-            ? ";".equals(scarletHome.trim()) && MavenDepsLoader.jarPath() != null
-                ? MavenDepsLoader.jarPath().getParent().toFile()
-                : new File(scarletHome).getAbsoluteFile()
-            : localappdata != null
-                ? new File(localappdata, GROUP+"/"+NAME)
-                : new File(user_home, "AppData/Local/"+GROUP+"/"+NAME);
+        
+        File dir0;
+        if (scarletHome != null && !scarletHome.trim().isEmpty() && !";".equals(scarletHome.trim()))
+        {
+            // SCARLET_HOME is explicitly set
+            dir0 = new File(scarletHome).getAbsoluteFile();
+        }
+        else if (";".equals(scarletHome != null ? scarletHome.trim() : null) && MavenDepsLoader.jarPath() != null)
+        {
+            // SCARLET_HOME=";" means use jar directory
+            dir0 = MavenDepsLoader.jarPath().getParent().toFile();
+        }
+        else if (Platform.CURRENT == Platform.$NIX)
+        {
+            // Linux: Use XDG_DATA_HOME if set, otherwise ~/.local/share
+            if (xdgDataHome != null && !xdgDataHome.trim().isEmpty())
+            {
+                dir0 = new File(xdgDataHome, GROUP+"/"+NAME);
+            }
+            else
+            {
+                dir0 = new File(user_home, ".local/share/"+GROUP+"/"+NAME);
+            }
+        }
+        else if (localappdata != null)
+        {
+            // Windows: Use LOCALAPPDATA
+            dir0 = new File(localappdata, GROUP+"/"+NAME);
+        }
+        else if (Platform.CURRENT == Platform.NT)
+        {
+            // Windows fallback
+            dir0 = new File(user_home, "AppData/Local/"+GROUP+"/"+NAME);
+        }
+        else
+        {
+            // Other platforms: use user home
+            dir0 = new File(user_home, "."+GROUP+"/"+NAME);
+        }
+        
         if (!dir0.isDirectory())
-            dir0.mkdirs();
+        {
+            if (!dir0.mkdirs())
+            {
+                System.err.println("Failed to create directory: " + dir0);
+            }
+        }
         dir = dir0;
     }
     public static final Logger LOG = LoggerFactory.getLogger("Scarlet");
@@ -268,27 +322,38 @@ public class Scarlet implements Closeable
         MiscUtils.close(this.ttsService);
         MiscUtils.close(this.discord);
         MiscUtils.close(this.logs);
+        MiscUtils.close(this.amplitude);
         MiscUtils.close(this.ui);
         this.data.saveAll();
         this.settings.updateRunVersionAndTime();
         LOG.info("Finished shutdown flow");
     }
 
-    final ScarletUISplash splash = new ScarletUISplash(this);
+    final IScarletUISplash splash = IScarletUISplash.create(this);
 
     volatile boolean running = true;
     volatile int exitCode = 0;
     boolean staffMode = false;
     final Runnable explicitGC = MiscUtils.withMinimumInterval(3600_000L, System::gc);
     final AtomicInteger threadidx = new AtomicInteger();
-    final ScheduledExecutorService exec = Executors.newScheduledThreadPool(4, runnable -> new Thread(runnable, "Scarlet Worker Thread "+this.threadidx.incrementAndGet()));
-    final ScheduledExecutorService execModal = Executors.newSingleThreadScheduledExecutor(runnable -> new Thread(runnable, "Scarlet Modal UI Thread "+this.threadidx.incrementAndGet()));
-    final ScheduledExecutorService execIPC = Executors.newSingleThreadScheduledExecutor(runnable -> new Thread(runnable, "Scarlet IPC Thread "+this.threadidx.incrementAndGet()));
-    
-    final ScarletSettings settings = new ScarletSettings(new File(dir, "settings.json"));
+    public final ScheduledExecutorService exec = Executors.newScheduledThreadPool(4, runnable -> new Thread(runnable, "Scarlet Worker Thread "+this.threadidx.incrementAndGet())),
+                                          execModal = Executors.newSingleThreadScheduledExecutor(runnable -> new Thread(runnable, "Scarlet Modal UI Thread "+this.threadidx.incrementAndGet())),
+                                          execIPC = Executors.newSingleThreadScheduledExecutor(runnable -> new Thread(runnable, "Scarlet IPC Thread "+this.threadidx.incrementAndGet()));
+
+    final ScarletSettings settings = new ScarletSettings(this, new File(dir, "settings.json"));
     {
         Float uiScale = this.settings.getObject("ui_scale", Float.class);
-        if (!HEADLESS && uiScale != null) Swing.scaleAll(uiScale.floatValue());
+        if (uiScale != null)
+        {
+            Swing.scaleAll(uiScale.floatValue());
+        }
+        else
+        {
+            // No manual override — try to auto-detect from desktop environment on Linux
+            Float autoScale = Swing.detectLinuxUIScale();
+            if (autoScale != null)
+                Swing.scaleAll(autoScale);
+        }
         String groupId = this.settings.getString("vrchat_group_id");
         if (groupId != null && !(groupId = VrcIds.resolveGroupId(groupId)).isEmpty())
         {
@@ -296,31 +361,111 @@ public class Scarlet implements Closeable
                 throw new IllegalStateException("Duplicate processes detected for group "+groupId);
         }
     }
-    final ScarletUI ui = new ScarletUI(this);
+    final IScarletUI ui = IScarletUI.create(this);
     final ScarletEventListener eventListener = new ScarletEventListener(this);
     final ScarletPendingModActions pendingModActions = new ScarletPendingModActions(new File(dir, "pending_moderation_actions.json"));
     final ScarletModerationTags moderationTags = new ScarletModerationTags(new File(dir, "moderation_tags.json"));
     final ScarletWatchedGroups watchedGroups = new ScarletWatchedGroups(new File(dir, "watched_groups.json"));
+    final ScarletWatchedEntities<User> watchedUsers = new ScarletWatchedEntities<>(new File(dir, "watched_users.json"), VrcIds.id_user, (user, id, embed) ->
+    {
+        if (user == null)
+        {
+            embed.setAuthor(id, "https://vrchat.com/home/user/"+id);
+            return;
+        }
+        String userDisplayName = MarkdownSanitizer.escape(user.getDisplayName()),
+               userIcon = MiscUtils.nonBlankOrNull(user.getUserIcon()),
+               userThumbnail = MiscUtils.nonBlankOrNull(user.getProfilePicOverride(), user.getCurrentAvatarImageUrl());
+        embed.setAuthor(userDisplayName, "https://vrchat.com/home/user/"+id, userIcon);
+        if (userThumbnail != null)
+        {
+            embed.setThumbnail(userThumbnail);
+        }
+    });
+    final ScarletWatchedEntities<Avatar> watchedAvatars = new ScarletWatchedEntities<>(new File(dir, "watched_avatars.json"), VrcIds.id_avatar, (avatar, id, embed) ->
+    {
+        if (avatar == null)
+        {
+            embed.setTitle(id, "https://vrchat.com/home/avatar/"+id);
+            return;
+        }
+        embed.setTitle(MarkdownSanitizer.escape(avatar.getName()), "https://vrchat.com/home/avatar/"+id);
+        User author = this.vrc.getUser(avatar.getAuthorId());
+        String authorName = MarkdownSanitizer.escape(author != null ? author.getDisplayName() : avatar.getAuthorName()),
+               authorIcon = author != null && !MiscUtils.blank(author.getUserIcon()) ? author.getUserIcon() : null;
+        embed.setAuthor(authorName, "https://vrchat.com/home/user/"+avatar.getAuthorId(), authorIcon);
+        if (!MiscUtils.blank(avatar.getThumbnailImageUrl()))
+        {
+            embed.setThumbnail(avatar.getThumbnailImageUrl());
+        }
+    });
     final ScarletStaffList staffList = new ScarletStaffList(new File(dir, "staff_list.json"));
     final ScarletSecretStaffList secretStaffList = new ScarletSecretStaffList(new File(dir, "secret_staff_list.json"));
     final ScarletVRChatReportTemplate vrcReport = new ScarletVRChatReportTemplate(new File(dir, "report_template.txt"));
     final ScarletData data = new ScarletData(new File(dir, "data"));
-    final TTSService ttsService = new TTSService(new File(dir, "tts"), this.eventListener);
-    final ScarletVRChat vrc = new ScarletVRChat(this, new File(dir, "store.bin"));
+    final ScarletVRChat vrc = new ScarletVRChat(this, "global", new File(dir, "store.bin"));
     final ScarletDiscord discord = new ScarletDiscordJDA(this, new File(dir, "discord_bot.json"), new File(dir, "discord_perms.json"));
+    private TtsService ttsService = null;
+    final ScarletCalendar calendar = new ScarletCalendar(this, new File(dir, "event_schedule.json"));
     final ScarletVRChatLogs logs = new ScarletVRChatLogs(this.eventListener);
+    final ScarletVRChatAmplitude amplitude = new ScarletVRChatAmplitude(this.eventListener);
     String[] last25logs = new String[0];
-    final ScarletUI.Setting<Boolean> confirmGroupInvite = this.ui.settingBool("ui_confirm_group_invite", "Confirmation dialog for group invites", false),
-                                     alertForUpdates = this.ui.settingBool("ui_alert_update", "Notify for updates", true),
-                                     alertForPreviewUpdates = this.ui.settingBool("ui_alert_update_preview", "Notify for preview updates", true),
-                                     showUiDuringLoad = this.ui.settingBool("ui_show_during_load", "Show UI during load", false);
-    final ScarletUI.Setting<Integer> auditPollingInterval = this.ui.settingInt("audit_polling_interval", "Audit polling interval seconds (10-300 inclusive)", 60, 10, 300);
-    final ScarletUI.Setting<Void> uiScale = this.ui.settingVoid("UI scale", "Set", this.ui::setUIScale);
+    final ScarletSettings.FileValued<Boolean> confirmGroupInvite = this.settings.new FileValuedBoolean("ui_confirm_group_invite", "Confirmation dialog for group invites", false),
+                                     alertForUpdates = this.settings.new FileValuedBoolean("ui_alert_update", "Notify for updates", true),
+                                     alertForPreviewUpdates = this.settings.new FileValuedBoolean("ui_alert_update_preview", "Notify for preview updates", true),
+                                     showUiDuringLoad = this.settings.new FileValuedBoolean("ui_show_during_load", "Show UI during load", false);
+    final ScarletSettings.FileValued<EnforcementAgeState> enforceInstances18plus = this.settings.new FileValuedEnum<>("enforce_instances_18_plus", "Instances: enforce 18+", EnforcementAgeState.DISABLED);
+    final ScarletSettings.FileValued<EnforcementListState> enforceInstancesWorlds = this.settings.new FileValuedEnum<>("enforce_instances_worlds", "Instances: enforce worlds", EnforcementListState.DISABLED);
+    final ScarletSettings.FileValued<String[]> enforceInstancesWorldList = this.settings.new FileValuedStringArrayPattern("enforce_instances_world_list", "Instances: enforce world list", new String[0], VrcIds.P_ID_WORLD, true);
+    final ScarletSettings.FileValued<Integer> auditPollingInterval = this.settings.new FileValuedIntRange("audit_polling_interval", "Audit polling interval seconds (10-300 inclusive)", 60, 10, 300);
+    final ScarletSettings.FileValued<Void> addAltCreds = this.settings.new FileValuedVoid("Add alternate credentials", "Add", this.vrc::addAlternateCredentials),
+                                  removeAltCreds = this.settings.new FileValuedVoid("Remove alternate credentials", "Remove", this.vrc::removeAlternateCredentials),
+                                  listAltCreds = this.settings.new FileValuedVoid("List alternate credentials", "List", this.vrc::listAlternateCredentials),
+                                  clearCreds = this.settings.new FileValuedVoid("Reset VRChat credentials", "Reset", this.vrc::clearCredentials),
+                                  uiScale = this.settings.new FileValuedVoid("UI scale", "Set", this.ui::setUIScale);
+
+    /**
+     * Initialize the TTS service with user consent dialogs.
+     * This method blocks until the user responds to any dialogs.
+     */
+    private synchronized void initTtsService()
+    {
+        if (this.ttsService != null)
+            return;
+        
+        try
+        {
+            // Get the parent component for dialogs
+            java.awt.Component parentComponent = this.ui.getParentComponent();
+            this.ttsService = new TtsService(new File(dir, "tts"), this.eventListener, this.discord, parentComponent);
+        }
+        catch (Exception ex)
+        {
+            LOG.error("Failed to initialize TTS service", ex);
+            this.ttsService = new TtsService(new File(dir, "tts"), this.eventListener, this.discord, null);
+        }
+    }
+
+    /**
+     * Get the TTS service, initializing it if necessary.
+     * @return The TTS service instance
+     */
+    public TtsService getTtsService()
+    {
+        if (this.ttsService == null)
+        {
+            this.initTtsService();
+        }
+        return this.ttsService;
+    }
 
     public void run()
     {
         this.ui.loadSettings();
         this.eventListener.settingsLoaded();
+        // Initialize TTS after UI is ready (for dialog parent component)
+        this.splash.splashSubtext("Initializing Text-to-Speech");
+        this.initTtsService();
         this.splash.splashSubtext("Logging in to VRChat Api");
         try
         {
@@ -394,10 +539,20 @@ public class Scarlet implements Closeable
                 if (!this.staffMode) try
                 {
                     this.maybeCheckInstances();
+                    this.maybeEnforceInstances();
                 }
                 catch (Exception ex)
                 {
                     LOG.error("Exception maybe checking instances", ex);
+                }
+                // maybe update calendar
+                if (!this.staffMode) try
+                {
+                    this.maybeUpdateCalendar();
+                }
+                catch (Exception ex)
+                {
+                    LOG.error("Exception maybe updating calendar", ex);
                 }
                 // maybe mod summary
                 if (!this.staffMode) try
@@ -481,9 +636,7 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
 */
     void runIPC()
     {
-        try (ServerSocket ipcServer = Platform.CURRENT.isNT()
-            ? new Win32NamedPipeServerSocket(255, "\\\\.\\pipe\\ScarletIPC-"+this.vrc.groupId, false, false, Win32SecurityLevel.NO_SECURITY)
-            : new UnixDomainServerSocket("/tmp/ScarletIPC-"+this.vrc.groupId+".sock", false))
+        try (ServerSocket ipcServer = createIpcServer())
         {
             try
             {
@@ -529,6 +682,77 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
         }
     }
 
+    /**
+     * Creates the IPC server using platform-specific implementation.
+     * Uses reflection on Windows to avoid ClassNotFoundException when loading Windows-specific classes on Linux.
+     */
+    private ServerSocket createIpcServer() throws Exception
+    {
+        if (Platform.CURRENT.isNT())
+        {
+            // Use reflection to avoid loading Windows-specific classes on non-Windows platforms.
+            // We discover the constructor dynamically because the ipcsocket API has changed across
+            // versions — hardcoding a specific signature causes NoSuchMethodException when the
+            // library is updated.
+            Class<?> socketClass        = Class.forName("org.scalasbt.ipcsocket.Win32NamedPipeServerSocket");
+            Class<?> securityLevelClass = Class.forName("org.scalasbt.ipcsocket.Win32SecurityLevel");
+            Object   noSecurity         = securityLevelClass.getField("NO_SECURITY").get(null);
+            String   pipeName           = "\\\\.\\pipe\\ScarletIPC-" + this.vrc.groupId;
+
+            // Try known constructor signatures from newest to oldest, logging which one matched.
+            // (String pipeName, boolean isInheritable, Win32SecurityLevel security)  — 1.6.x
+            try
+            {
+                java.lang.reflect.Constructor<?> ctor = socketClass.getConstructor(String.class, boolean.class, securityLevelClass);
+                LOG.info("IPC: using Win32NamedPipeServerSocket(String, boolean, Win32SecurityLevel)");
+                return (ServerSocket) ctor.newInstance(pipeName, false, noSecurity);
+            }
+            catch (NoSuchMethodException ignored) {}
+
+            // (String pipeName, boolean isInheritable)  — some intermediate versions
+            try
+            {
+                java.lang.reflect.Constructor<?> ctor = socketClass.getConstructor(String.class, boolean.class);
+                LOG.info("IPC: using Win32NamedPipeServerSocket(String, boolean)");
+                return (ServerSocket) ctor.newInstance(pipeName, false);
+            }
+            catch (NoSuchMethodException ignored) {}
+
+            // (int backlog, String pipeName, boolean inheritHandle, boolean isInheritable, Win32SecurityLevel security)  — 1.5.x
+            try
+            {
+                java.lang.reflect.Constructor<?> ctor = socketClass.getConstructor(int.class, String.class, boolean.class, boolean.class, securityLevelClass);
+                LOG.info("IPC: using Win32NamedPipeServerSocket(int, String, boolean, boolean, Win32SecurityLevel)");
+                return (ServerSocket) ctor.newInstance(255, pipeName, false, false, noSecurity);
+            }
+            catch (NoSuchMethodException ignored) {}
+
+            // Last resort: log all available constructors to help diagnose future version changes
+            java.lang.reflect.Constructor<?>[] ctors = socketClass.getConstructors();
+            StringBuilder sb = new StringBuilder("IPC: No known Win32NamedPipeServerSocket constructor matched. Available constructors:\n");
+            for (java.lang.reflect.Constructor<?> c : ctors)
+                sb.append("  ").append(c).append("\n");
+            LOG.error(sb.toString());
+            throw new NoSuchMethodException("No compatible Win32NamedPipeServerSocket constructor found in ipcsocket on classpath");
+        }
+        else
+        {
+            // Clean up any leftover socket file from a previous instance
+            // This handles the case where the previous instance didn't shut down cleanly
+            String socketPath = "/tmp/ScarletIPC-"+this.vrc.groupId+".sock";
+            Path socketFilePath = Paths.get(socketPath);
+            try
+            {
+                Files.deleteIfExists(socketFilePath);
+            }
+            catch (IOException ex)
+            {
+                LOG.warn("Failed to delete existing socket file: " + socketPath, ex);
+            }
+            return new UnixDomainServerSocket(socketPath, false);
+        }
+    }
+
     void rawCommand(String line)
     {
         if (line == null || line.isEmpty())
@@ -541,6 +765,18 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             {
             default: {
                 LOG.info("Unknown CLI command: "+op);
+            } break;
+            case "info":
+            case "help": {
+                StringBuilder sb = new StringBuilder("CLI commands:");
+                sb.append("\n\thelp (alternate: info)");
+                sb.append("\n\tlogout");
+                sb.append("\n\texit (alternate: halt, quit, stop)");
+                sb.append("\n\texplore");
+                sb.append("\n\ttts <text to speak>");
+                sb.append("\n\tlink <VRChat UserID> <Discord UserSF>");
+                sb.append("\n\timportgroups <file | URL>");
+                sb.append("\n\timportgroupsjson <file | URL>");
             } break;
             case "logout": {
                 LOG.info("Logout success: "+this.vrc.logout());
@@ -559,8 +795,15 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
                 String text = ls.nextLine().trim();
                 if (!text.isEmpty())
                 {
-                    this.ttsService.setOutputToDefaultAudioDevice(this.eventListener.ttsUseDefaultAudioDevice.get());
-                    LOG.info("Submitting TTS: `"+text+"`, success: "+this.ttsService.submit("cli-"+Long.toUnsignedString(System.nanoTime()), text));
+                    TtsService tts = this.getTtsService();
+                    if (tts != null)
+                    {
+                        LOG.info("Submitting TTS: `"+text+"`, success: "+tts.submit("cli-"+Long.toUnsignedString(System.nanoTime()), text));
+                    }
+                    else
+                    {
+                        LOG.warn("TTS service not available");
+                    }
                 }
             } break;
             case "link": {
@@ -664,9 +907,10 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             if (!Objects.equals(this.newerVersion, cmp_version) && MiscUtils.compareSemVer(VERSION, cmp_version) < 0)
             {
                 LOG.info(NAME+" version "+cmp_version+" available");
-                if (this.alertForUpdates.get() && !HEADLESS)
+                if (this.alertForUpdates.get())
                 {
-                    this.execModal.execute(() -> JOptionPane.showMessageDialog(null, NAME+" version "+cmp_version+" available", "Update available", JOptionPane.INFORMATION_MESSAGE));
+                    this.settings.requireConfirmYesNoAsync(NAME+" version "+cmp_version+" available, open in browser?", "Update available",
+                        () -> MiscUtils.AWTDesktop.browse(URI.create(GITHUB_URL+"/releases/tag/"+cmp_version)), null);
                 }
                 this.newerVersion = cmp_version;
             }
@@ -697,6 +941,28 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
         }
     }
 
+    OffsetDateTime lastInstanceEnforce = OffsetDateTime.now(ZoneOffset.UTC);
+    void maybeEnforceInstances()
+    {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (now.isAfter(this.lastInstanceEnforce.plusMinutes(1L)))
+        {
+            this.lastInstanceEnforce = now;
+            this.enforceInstances();
+        }
+    }
+
+    OffsetDateTime lastCalendarUpdate = OffsetDateTime.now(ZoneOffset.UTC);
+    void maybeUpdateCalendar()
+    {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (now.isAfter(this.lastCalendarUpdate.plusMinutes(1L)))
+        {
+            this.lastCalendarUpdate = now;
+            this.calendar.update();
+        }
+    }
+
     void checkInstances()
     {
         List<GroupInstance> groupInstances = this.vrc.getGroupInstances(this.vrc.groupId);
@@ -712,6 +978,7 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             locations.remove(location);
             ScarletData.InstanceEmbedMessage instanceEmbedMessage = this.data.liveInstancesMetadata_getLocationInstanceEmbedMessage(location, false);
             this.discord.emitExtendedInstanceMonitor(this, location, instanceEmbedMessage);
+            
         }
         if (locations.isEmpty())
             return;
@@ -720,6 +987,102 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             String auditEntryId = this.data.liveInstancesMetadata_getLocationAudit(location, true);
             ScarletData.InstanceEmbedMessage instanceEmbedMessage = this.data.liveInstancesMetadata_getLocationInstanceEmbedMessage(location, true);
             this.discord.emitExtendedInstanceInactive(this, location, auditEntryId, instanceEmbedMessage);
+        }
+    }
+
+    void enforceInstances()
+    {
+        EnforcementAgeState enforceAge = this.enforceInstances18plus.get();
+        EnforcementListState enforceWorlds = this.enforceInstancesWorlds.get();
+        if (enforceAge == EnforcementAgeState.DISABLED && enforceWorlds == EnforcementListState.DISABLED)
+            return;
+        List<GroupInstance> groupInstances = this.vrc.getGroupInstances(this.vrc.groupId);
+        if (groupInstances == null || groupInstances.isEmpty())
+            return;
+        String[] enforceWorldsList = this.enforceInstancesWorldList.get();
+//        this.vrc.getWorld(API_BASE_0)t
+        for (GroupInstance groupInstance : groupInstances)
+        {
+            String worldId = groupInstance.getWorld().getId(),
+                   worldName = groupInstance.getWorld().getName(),
+                   instanceId = groupInstance.getInstanceId(),
+                   location = groupInstance.getLocation();
+            switch (enforceWorlds)
+            {
+            case ENABLED_WHITELIST:
+            {
+                if (0 > MiscUtils.indexOf(worldId, enforceWorldsList))
+                {
+                    if (this.vrc.closeInstance(worldId, instanceId, true, null) != null)
+                    {
+                        this.discord.emitExtendedInstanceEnforcement(this, location, worldName, "World not whitelisted");
+                        LOG.info("Instance enforcement: "+location+" ("+worldName+"): World not whitelisted");
+                    }
+                    else
+                    {
+                        LOG.warn("Instance enforcement failure: "+location+" ("+worldName+"): World not whitelisted");
+                    }
+                    continue;
+                }
+            }
+            break;
+            case ENABLED_BLACKLIST:
+            {
+                if (0 >= MiscUtils.indexOf(groupInstance.getWorld().getId(), enforceWorldsList))
+                {
+                    if (this.vrc.closeInstance(worldId, instanceId, true, null) != null)
+                    {
+                        this.discord.emitExtendedInstanceEnforcement(this, location, worldName, "World blacklisted");
+                        LOG.info("Instance enforcement: "+location+" ("+worldName+"): World blacklisted");
+                    }
+                    else
+                    {
+                        LOG.warn("Instance enforcement failure: "+location+" ("+worldName+"): World blacklisted");
+                    }
+                    continue;
+                }
+            }
+            default:
+            }
+            switch (enforceAge)
+            {
+            case ENABLED_NEVER_18_PLUS:
+            {
+                Location locationModel = Location.of(worldId, instanceId);
+                if (locationModel.isConcrete() && locationModel.ageGate)
+                {
+                    if (this.vrc.closeInstance(worldId, instanceId, true, null) != null)
+                    {
+                        this.discord.emitExtendedInstanceEnforcement(this, location, worldName, "Age-gating disallowed");
+                        LOG.info("Instance enforcement: "+location+" ("+worldName+"): Age-gating disallowed");
+                    }
+                    else
+                    {
+                        LOG.warn("Instance enforcement failure: "+location+" ("+worldName+"): Age-gating disallowed");
+                    }
+                    continue;
+                }
+            }
+            break;
+            case ENABLED_ONLY_18_PLUS:
+            {
+                Location locationModel = Location.of(worldId, instanceId);
+                if (locationModel.isConcrete() && !locationModel.ageGate)
+                {
+                    if (this.vrc.closeInstance(worldId, instanceId, true, null) != null)
+                    {
+                        this.discord.emitExtendedInstanceEnforcement(this, location, worldName, "Age-gating mandatory");
+                        LOG.info("Instance enforcement: "+location+" ("+worldName+"): Age-gating mandatory");
+                    }
+                    else
+                    {
+                        LOG.warn("Instance enforcement failure: "+location+" ("+worldName+"): Age-gating mandatory");
+                    }
+                    continue;
+                }
+            }
+            default:
+            }
         }
     }
 
@@ -735,7 +1098,7 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
         }
         if (now.isAfter(next))
         {
-            this.settings.nextModSummary.set(next.plusHours(this.settings.heuristicPeriodDays.getOrSupply() * 24L));
+            this.settings.nextModSummary.set(next.plusHours(this.settings.heuristicPeriodDays.get() * 24L));
             this.modSummary(next);
         }
     }
@@ -757,7 +1120,7 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
         }
         if (now.isAfter(next))
         {
-            this.settings.nextOutstandingMod.set(next.plusHours(this.settings.outstandingPeriodDays.getOrSupply() * 24L));
+            this.settings.nextOutstandingMod.set(next.plusHours(this.settings.outstandingPeriodDays.get() * 24L));
             this.outstandingMod(next);
         }
     }
@@ -783,10 +1146,6 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
         }
     }
 
-    static final int CATCH_UP_INSTANTANEOUS = 0,
-                     CATCH_UP_SKIP_UNTIL_24 = 1,
-                     CATCH_UP_LIMIT_NEXT_24 = 2;
-    int catchupMode = CATCH_UP_LIMIT_NEXT_24;
     boolean wantsVrcRefresh = false;
     public void queueVrcRefresh()
     {
@@ -807,50 +1166,72 @@ Send-ScarletIPC -GroupID 'grp_00000000-0000-0000-0000-000000000000' -Message 'st
             offsetMillis += (30_000L - currentPollInterval) / 10L;
         }
         OffsetDateTime from = this.settings.lastAuditQuery.getOrSupply(),
-                       to = OffsetDateTime.now(ZoneOffset.UTC).minusNanos(offsetMillis * 1_000_000L);
-        switch (this.catchupMode)
+                       to = OffsetDateTime.now(ZoneOffset.UTC).minusNanos(offsetMillis * 1_000_000L),
+                       lastAuditQuery = from,
+                       latest = from.plusHours(24);
+        boolean catchupSkip = false;
+        if (catchupSkip)
         {
-        default:
-        case CATCH_UP_INSTANTANEOUS: {
-            // noop
-        } break;
-        case CATCH_UP_SKIP_UNTIL_24: {
             OffsetDateTime earliest = to.minusHours(24);
             if (from.isBefore(earliest))
             {
                 LOG.info("Catching up: Skipping from "+from+" to "+earliest+" ("+Duration.between(from, earliest)+" total)");
                 from = earliest;
+                lastAuditQuery = to;
             }
-        } break;
-        case CATCH_UP_LIMIT_NEXT_24: {
-            OffsetDateTime latest = from.plusHours(24);
+            else
+            {
+                to = null;
+            }
+        }
+        else
+        {
             if (latest.isBefore(to))
             {
                 LOG.info("Catching up: Only querying a 24-hour period");
                 to = latest;
+                lastAuditQuery = to;
             }
-        } break;
+            else
+            {
+                to = null;
+            }
         }
-        LOG.debug("Querying from "+from+" to "+to);
+        
+        LOG.debug("Querying from "+from+" to "+(to!=null?to:"now"));
         List<GroupAuditLogEntry> entries = this.vrc.auditQuery(from, to);
         
         if (entries == null)
         {
-            LOG.warn("Failed to get entries from "+from+" to "+to);
+            LOG.warn("Failed to get entries from "+from+" to "+(to!=null?to:"now"));
             return;
         }
         
         for (GroupAuditLogEntry entry : entries) try
         {
-            this.discord.process(this, entry);
+            switch (entry.getEventType())
+            {
+            case "group.update": // GroupAuditType.UPDATE
+            case "group.transfer.accept": // GroupAuditType.TRANSFER_ACCEPT
+            case "group.role.create": // GroupAuditType.ROLE_CREATE
+            case "group.role.delete": // GroupAuditType.ROLE_DELETE
+            case "group.role.update": // GroupAuditType.ROLE_UPDATE
+                this.vrc.updateGroupInfo();
+            default:
+                this.discord.process(this, entry);
+            }
+            if (lastAuditQuery.isBefore(entry.getCreatedAt()))
+            {
+                lastAuditQuery = entry.getCreatedAt();
+            }
         }
         catch (Exception ex)
         {
             LOG.error("Exception processing audit entry "+entry.getId()+" of type "+entry.getEventType()+": `"+entry.toJson()+"`", ex);
             ex.printStackTrace();
         }
-        
-        this.settings.lastAuditQuery.set(to);
+
+        this.settings.lastAuditQuery.set(lastAuditQuery);
     }
 
 }

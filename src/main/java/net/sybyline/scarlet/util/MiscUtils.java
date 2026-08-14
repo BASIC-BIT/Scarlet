@@ -25,11 +25,16 @@ import java.time.OffsetDateTime;
 import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.TextStyle;
+import java.time.temporal.ChronoField;
 import java.time.temporal.TemporalAmount;
 import java.time.zone.ZoneRules;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.Formatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,15 +56,88 @@ import net.sybyline.scarlet.Scarlet;
 public interface MiscUtils
 {
 
+    static boolean blank(String string)
+    {
+        return string == null || string.isEmpty();
+    }
+
+    static StringBuilder fmt(StringBuilder sb, String format, Object... params)
+    {
+        @SuppressWarnings({ "unused", "resource" })
+        Formatter fmt = new Formatter(sb).format(format, params);
+        return sb;
+    }
+
+    static String nonBlankOrNull(String string1)
+    {
+        return !blank(string1) ? string1 : null;
+    }
+    static String nonBlankOrNull(String string1, String string2)
+    {
+        return !blank(string1) ? string1 : !blank(string2) ? string2 : null;
+    }
+    static String nonBlankOrNull(String string1, String string2, String string3)
+    {
+        return !blank(string1) ? string1 : !blank(string2) ? string2 : !blank(string3) ? string3 : null;
+    }
+
     static String maybeEllipsis(int maxLength, String string)
     {
         return string == null || string.length() <= maxLength ? string : (string.substring(0, maxLength - 1) + '\u2026');
+    }
+    static String maybeEllipsisReverse(int maxLength, String string)
+    {
+        return string == null || string.length() <= maxLength ? string : ('\u2026' + string.substring(maxLength - 1));
+    }
+
+    static int levenshteinEditDistance(CharSequence lhs, CharSequence rhs)
+    {
+        // short path
+        if (lhs == null || lhs.length() == 0)
+            return rhs == null ? 0 : rhs.length();
+        else if (rhs == null || rhs.length() == 0)
+            return lhs.length();
+        if (rhs.length() < lhs.length())
+        {
+            CharSequence swap = rhs;
+            rhs = lhs;
+            lhs = swap;
+        }
+        int rhsLen = rhs.length(),
+            prev[] = new int[rhsLen + 1],
+            curr[] = new int[rhsLen + 1],
+            next[];
+        for (int j = 0; j <= rhsLen; j++)
+            prev[j] = j;
+        for (int i = 1; i <= lhs.length(); next = curr, curr = prev, prev = next, i++)
+            for (int j = 0; j <= rhsLen; j++)
+                curr[j] = j == 0
+                    ? i
+                    : lhs.charAt(i - 1) == rhs.charAt(j - 1)
+                        ? prev[j - 1]
+                        : 1 + Math.min(prev[j - 1], Math.min(prev[j], curr[j - 1]));
+        return prev[rhsLen];
     }
 
     static final ZoneRules DEFAULT_ZONE_RULES = ZoneId.systemDefault().getRules();
     static OffsetDateTime odt2utc(LocalDateTime ldt)
     {
         return OffsetDateTime.of(ldt, DEFAULT_ZONE_RULES.getOffset(ldt)).withOffsetSameInstant(ZoneOffset.UTC);
+    }
+
+    static final DateTimeFormatter
+        DAY_NAME_FULL = new DateTimeFormatterBuilder().appendText(ChronoField.DAY_OF_WEEK, TextStyle.FULL).toFormatter(),
+        MONTH_NAME_FULL = new DateTimeFormatterBuilder().appendText(ChronoField.MONTH_OF_YEAR, TextStyle.FULL).toFormatter();
+
+    static String ordinalSuffix(long ordinal)
+    {
+        switch ((int)Math.abs(ordinal % 10L))
+        {
+        default: return "th";
+        case  1: return "st";
+        case  2: return "nd";
+        case  3: return "rd";
+        }
     }
 
     @SafeVarargs
@@ -70,6 +148,18 @@ public interface MiscUtils
         if (Objects.equals(array[i], target))
             return i;
         return -1;
+    }
+
+    @SafeVarargs
+    static <T> T[] without(int index, T... array)
+    {
+        if (array == null || index < 0 || index >= array.length)
+            return array;
+        int newLength = array.length - 1;
+        T[] result = Arrays.copyOf(array, newLength);
+        if (index < newLength)
+            System.arraycopy(array, index + 1, result, index, newLength - index);
+        return result;
     }
 
     static boolean sleep(long millis)
@@ -160,8 +250,24 @@ public interface MiscUtils
         return ret;
     }
 
+    @SafeVarargs
+    static <T> T[] append(T[] arr, T... vals)
+    {
+        if (arr == null || arr.length == 0)
+            return vals;
+        if (vals == null || vals.length == 0)
+            return arr;
+        int off = arr.length,
+            len = vals.length;
+        arr = Arrays.copyOf(arr, off + len);
+        System.arraycopy(vals, 0, arr, off, len);
+        return arr;
+    }
+
     static String extractTypedUuid(String type, String fallback, String idContaining)
     {
+        if (idContaining == null)
+            return fallback;
         Matcher m = Pattern.compile(type+"_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").matcher(idContaining);
         return m.find() ? m.group() : fallback;
     }
@@ -518,41 +624,113 @@ public interface MiscUtils
     {
         static boolean open(File file)
         {
+            // Try AWT Desktop first (works reliably on Windows/macOS)
             if (Desktop.isDesktopSupported()) try
             {
-                Desktop.getDesktop().open(file);
-                return true;
+                Desktop desktop = Desktop.getDesktop();
+                if (desktop.isSupported(Desktop.Action.OPEN))
+                {
+                    desktop.open(file);
+                    return true;
+                }
             }
             catch (Exception ex)
             {
                 Scarlet.LOG.error("Exception opening file "+file, ex);
             }
+            // Linux fallback: xdg-open
+            if (Platform.CURRENT.is$nix())
+            {
+                try
+                {
+                    new ProcessBuilder("xdg-open", file.getAbsolutePath())
+                        .inheritIO()
+                        .start();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Scarlet.LOG.error("Exception opening file via xdg-open "+file, ex);
+                }
+            }
+            Scarlet.LOG.warn("Desktop OPEN action is not supported on this platform");
             return false;
         }
         static boolean edit(File file)
         {
+            // Try AWT Desktop first (works reliably on Windows/macOS)
             if (Desktop.isDesktopSupported()) try
             {
-                Desktop.getDesktop().edit(file);
-                return true;
+                Desktop desktop = Desktop.getDesktop();
+                if (desktop.isSupported(Desktop.Action.EDIT))
+                {
+                    desktop.edit(file);
+                    return true;
+                }
             }
             catch (Exception ex)
             {
                 Scarlet.LOG.error("Exception editing file "+file, ex);
             }
+            // Linux fallback: xdg-open (opens with default editor)
+            if (Platform.CURRENT.is$nix())
+            {
+                try
+                {
+                    new ProcessBuilder("xdg-open", file.getAbsolutePath())
+                        .inheritIO()
+                        .start();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Scarlet.LOG.error("Exception editing file via xdg-open "+file, ex);
+                }
+            }
+            Scarlet.LOG.warn("Desktop EDIT action is not supported on this platform");
             return false;
         }
         static boolean browse(URI uri)
         {
+            // Try AWT Desktop first (works reliably on Windows/macOS)
             if (Desktop.isDesktopSupported()) try
             {
-                Desktop.getDesktop().browse(uri);
-                return true;
+                Desktop desktop = Desktop.getDesktop();
+                if (desktop.isSupported(Desktop.Action.BROWSE))
+                {
+                    desktop.browse(uri);
+                    return true;
+                }
             }
             catch (Exception ex)
             {
                 Scarlet.LOG.error("Exception browsing to uri "+uri, ex);
             }
+            // Linux fallback: try xdg-open, then common browsers
+            if (Platform.CURRENT.is$nix())
+            {
+                for (String cmd : new String[]{"xdg-open", "sensible-browser", "x-www-browser", "firefox", "chromium-browser", "google-chrome"})
+                {
+                    final String finalCmd = cmd;
+                    try
+                    {
+                        new ProcessBuilder(finalCmd, uri.toString())
+                            .inheritIO()
+                            .start();
+                        Scarlet.LOG.info("Opened URI via "+finalCmd+": "+uri);
+                        return true;
+                    }
+                    catch (IOException ex)
+                    {
+                        // This command not found, try next
+                    }
+                    catch (Exception ex)
+                    {
+                        Scarlet.LOG.error("Exception browsing to uri via "+finalCmd+" "+uri, ex);
+                    }
+                }
+            }
+            Scarlet.LOG.warn("Desktop BROWSE action is not supported on this platform");
             return false;
         }
     }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -21,6 +22,8 @@ import net.dv8tion.jda.api.interactions.commands.build.SlashCommandData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandData;
 import net.dv8tion.jda.api.interactions.commands.build.SubcommandGroupData;
 import net.dv8tion.jda.api.interactions.commands.localization.LocalizationMap;
+import net.sybyline.scarlet.util.Resource;
+import net.sybyline.scarlet.util.ThreadLocalSwap;
 
 public interface DCommands
 {
@@ -76,13 +79,13 @@ public interface DCommands
 
     static boolean equals_command(Command current, CommandData data)
     {
-String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getFullCommandName()+' '; try {
+try (Resource prevCommand = DCommandsUtil.command.push(current.getFullCommandName()+' ')) {
         if (!Objects.equals(data.getType(), current.getType()))
             return neq("type", current.getType(), data.getType());
         if (!Objects.equals(data.getName(), current.getName()))
             return neq("name", current.getName(), data.getName());
-        if (data.isGuildOnly() != current.isGuildOnly())
-            return neq("guildOnly", current.isGuildOnly(), data.isGuildOnly());
+        if (!equals_set(data.getContexts(), current.getContexts()))
+            return neq("contexts", current.getContexts(), data.getContexts());
         if (data.isNSFW() != current.isNSFW())
             return neq("NSFW", current.isNSFW(), data.isNSFW());
         if (!equals_locale(data.getNameLocalizations(), current.getNameLocalizations()))
@@ -107,11 +110,11 @@ String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getF
             }
         }
         return true;
-} finally { DCommandsUtil.command = prevCommand; }
+}
     }
     static boolean equals_group(SubcommandGroupData data, Command.SubcommandGroup current)
     {
-String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getFullCommandName()+' '; try {
+try (Resource prevCommand = DCommandsUtil.command.push(current.getFullCommandName()+' ')) {
         if (!Objects.equals(data.getName(), current.getName()))
             return neq("name", current.getName(), data.getName());
         if (!Objects.equals(data.getDescription(), current.getDescription()))
@@ -123,11 +126,11 @@ String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getF
         if (!equals_list(data.getSubcommands(), SubcommandData::getName, current.getSubcommands(), Command.Subcommand::getName, DCommands::equals_sub))
             return false;
         return true;
-} finally { DCommandsUtil.command = prevCommand; }
+}
     }
     static boolean equals_sub(SubcommandData data, Command.Subcommand current)
     {
-String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getFullCommandName()+' '; try {
+try (Resource prevCommand = DCommandsUtil.command.push(current.getFullCommandName()+' ')) {
         if (!Objects.equals(data.getName(), current.getName()))
             return neq("name", current.getName(), data.getName());
         if (!Objects.equals(data.getDescription(), current.getDescription()))
@@ -139,7 +142,7 @@ String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getF
         if (!equals_list(data.getOptions(), OptionData::getName, current.getOptions(), Command.Option::getName, DCommands::equals_option))
             return false;
         return true;
-} finally { DCommandsUtil.command = prevCommand; }
+}
     }
     static boolean equals_option(OptionData data, Command.Option current)
     {
@@ -161,10 +164,10 @@ String prevCommand = DCommandsUtil.command; DCommandsUtil.command = current.getF
             return neq("nameLocalizations", current.getNameLocalizations().toMap(), data.getNameLocalizations().toMap());
         if (!equals_locale(data.getDescriptionLocalizations(), current.getDescriptionLocalizations()))
             return neq("descriptionLocalizations", current.getDescriptionLocalizations().toMap(), data.getDescriptionLocalizations().toMap());
-DCommandsUtil.option = "/ "+current.getName()+' '; try {
+try (Resource prevCommand = DCommandsUtil.option.push("/ "+current.getName()+' ')) {
         if (!equals_list(data.getChoices(), Command.Choice::getName, current.getChoices(), Command.Choice::getName, DCommands::equals_choice))
             return false;
-} finally { DCommandsUtil.option = ""; }
+}
         return true;
     }
     static boolean equals_choice(Command.Choice data, Command.Choice current)
@@ -202,7 +205,7 @@ DCommandsUtil.option = "/ "+current.getName()+' '; try {
         return data.longValue() == current.longValue();
     }
 
-    static <Current, Data> boolean equals_list(List<Current> data, Function<Current, String> dataName, List<Data> current, Function<Data, String> currentName, BiPredicate<Current, Data> equalifier)
+    static <Data, Current> boolean equals_list(List<Data> data, Function<Data, String> dataName, List<Current> current, Function<Current, String> currentName, BiPredicate<Data, Current> equalifier)
     {
         if (data.size() != current.size())
             return false;
@@ -216,15 +219,28 @@ DCommandsUtil.option = "/ "+current.getName()+' '; try {
         return true;
     }
 
+    static <Data> boolean equals_set(Set<Data> data, Set<Data> current)
+    {
+        if (data.size() != current.size())
+            return false;
+        for (Data datum : data)
+            if (!current.contains(datum))
+                return false;
+        for (Data datum : current)
+            if (!data.contains(datum))
+                return false;
+        return true;
+    }
+
 }
 
-class DCommandsUtil
+interface DCommandsUtil
 {
-    static String command = "";
-    static String option = "";
+    ThreadLocalSwap<String> command = ThreadLocalSwap.of(""),
+                            option = ThreadLocalSwap.of("");
     static String value(Object value)
     {
-        return command + option + value;
+        return command.get() + option.get() + value;
     }
 }
 

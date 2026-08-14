@@ -4,12 +4,16 @@ import java.io.IOException;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 import com.google.gson.TypeAdapter;
 import com.google.gson.annotations.SerializedName;
@@ -31,7 +35,7 @@ public interface AvatarSearch
         URL_ROOT_AVTRDB = AvatarSearch_AvtrDB.API_ROOT+"/avatar/search/vrcx",
         URL_ROOT_NEKOSUNEVR = AvatarSearch_VRCDS.API_ROOT+"/vrcx_search",
         URL_ROOT_VRCDB = "https://vrcx.vrcdb.com/avatars/Avatar/VRCX",
-        URL_ROOT_WORLDBALANCER = AvatarSearch_WorldBalancer.API_ROOT+"/vrcx_search.php",
+        URL_ROOT_WORLDBALANCER = AvatarSearch_WorldBalancer.API_ROOT+"/vrcx_search",
         URL_ROOTS[] =
         {
             URL_ROOT_AVATARRECOVERY,
@@ -44,7 +48,8 @@ public interface AvatarSearch
     class VrcxAvatar
     {
         static final VrcxAvatar[] NONE = new VrcxAvatar[0];
-        static final Map<String, Map<String, VrcxAvatar[]>> searchCacheByUrlRoot = new ConcurrentHashMap<>();
+        static final Map<String, Map<String, VrcxAvatar[]>> searchCacheByUrlRoot = new ConcurrentHashMap<>(),
+                                                            searchCacheByUrlRootByImage = new ConcurrentHashMap<>();
         
         @SerializedName(value = "id", alternate = { "avatarId", "avatar_id", "vrcId", "vrc_id" })
         public String id;
@@ -431,7 +436,7 @@ public interface AvatarSearch
     {
         if (!urlRoot.startsWith("http://") && !urlRoot.startsWith("https://"))
             return VrcxAvatar.NONE;
-        try (HttpURLInputStream in = HttpURLInputStream.get(urlRoot + "?n=" + Integer.toUnsignedString(n) + "&search=" + URLs.encode(search)))
+        try (HttpURLInputStream in = HttpURLInputStream.get(urlRoot + "?n=" + Integer.toUnsignedString(n) + "&search=" + URLs.encode(search), ExtendedUserAgent.init_conn))
         {
             return in.readAsJson(null, null, VrcxAvatar[].class);
         }
@@ -510,6 +515,119 @@ public interface AvatarSearch
             .flatMap(Arrays::stream)
             .filter(Objects::nonNull)
         ;
+    }
+
+    interface ByImage
+    {
+        String BY_IMAGE_URL_ROOTS[] =
+        {
+            URL_ROOT_AVTRDB,
+        };
+        static VrcxAvatar[] vrcxSearch0ByImage(String urlRoot, int n, String imageFileId)
+        {
+            if (!urlRoot.startsWith("http://") && !urlRoot.startsWith("https://"))
+                return VrcxAvatar.NONE;
+            try (HttpURLInputStream in = HttpURLInputStream.get(urlRoot + "?n=" + Integer.toUnsignedString(n) + "&fileId=" + imageFileId, ExtendedUserAgent.init_conn))
+            {
+                return in.readAsJson(null, null, VrcxAvatar[].class);
+            }
+            catch (Exception ex)
+            {
+                ex.printStackTrace();
+                return null;
+            }
+        }
+        static VrcxAvatar[] vrcxFindInCacheByImage(String urlRoot, String imageFileId)
+        {
+            return VrcxAvatar.searchCacheByUrlRootByImage.getOrDefault(urlRoot, Collections.emptyMap()).get(imageFileId);
+        }
+        static VrcxAvatar[] vrcxPutInCacheByImage(String urlRoot, String imageFileId, VrcxAvatar[] results)
+        {
+            VrcxAvatar.searchCacheByUrlRootByImage.computeIfAbsent(urlRoot, urlRoot0 -> LRUMap.ofSynchronized()).put(imageFileId, results);
+            return results;
+        }
+        static VrcxAvatar[] vrcxSearchCachedByImage(String urlRoot, String imageFileId)
+        {
+            return vrcxSearchCachedByImage(urlRoot, SEARCH_N, imageFileId);
+        }
+        static VrcxAvatar[] vrcxSearchCachedByImage(String urlRoot, int n, String imageFileId)
+        {
+            Map<String, VrcxAvatar[]> urlCache;
+            synchronized (VrcxAvatar.searchCacheByUrlRootByImage) {
+                urlCache = VrcxAvatar.searchCacheByUrlRootByImage.computeIfAbsent(urlRoot, urlRoot0 -> LRUMap.ofSynchronized());
+            }
+            
+            synchronized (urlCache) {
+                VrcxAvatar[] cached = urlCache.get(imageFileId);
+                if (cached == null) {
+                    cached = AvatarSearch.ByImage.vrcxSearchByImage(urlRoot, n, imageFileId);
+                    if (cached != null) {
+                        urlCache.put(imageFileId, cached);
+                    }
+                }
+                return cached;
+            }
+        }
+        static VrcxAvatar[] vrcxSearchByImage(String urlRoot, String imageFileId)
+        {
+            return vrcxSearchByImage(urlRoot, SEARCH_N, imageFileId);
+        }
+        static VrcxAvatar[] vrcxSearchByImage(String urlRoot, int n, String imageFileId)
+        {
+            VrcxAvatar[] results = vrcxSearch0ByImage(urlRoot, n, imageFileId);
+            if (n == SEARCH_N)
+                vrcxPutInCacheByImage(urlRoot, imageFileId, results);
+            return results;
+        }
+        static Stream<VrcxAvatar> vrcxSearchAllCachedByImage(String imageFileId)
+        {
+            return vrcxSearchAllCachedByImage(BY_IMAGE_URL_ROOTS, imageFileId);
+        }
+        static Stream<VrcxAvatar> vrcxSearchAllCachedByImage(String[] urlRoots, String imageFileId)
+        {
+            return Arrays.stream(urlRoots)
+                .filter(Objects::nonNull)
+                .map($ -> vrcxSearchCachedByImage($, SEARCH_N, imageFileId))
+                .filter(Objects::nonNull)
+                .flatMap(Arrays::stream)
+                .filter(Objects::nonNull)
+            ;
+        }
+        static Stream<VrcxAvatar> vrcxSearchAllByImage(String imageFileId)
+        {
+            return vrcxSearchAllByImage(BY_IMAGE_URL_ROOTS, imageFileId);
+        }
+        static Stream<VrcxAvatar> vrcxSearchAllByImage(String[] urlRoots, String imageFileId)
+        {
+            return Arrays.stream(urlRoots)
+                .filter(Objects::nonNull)
+                .map($ -> vrcxSearchByImage($, SEARCH_N, imageFileId))
+                .filter(Objects::nonNull)
+                .flatMap(Arrays::stream)
+                .filter(Objects::nonNull)
+            ;
+        }
+    }
+
+    interface Ingestion
+    {
+        ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+        static void ingest(List<String> avatarIds, String attribution)
+        {if (null==null)return;
+            long time = 0L;
+            for (int i = 0; i < avatarIds.size(); i += AvatarSearch_AvtrDB.MAX_BULK_INGEST, time += 15_000L)
+            {
+                String[] subarray = avatarIds.subList(i, Math.min(i + AvatarSearch_AvtrDB.MAX_BULK_INGEST, avatarIds.size())).toArray(new String[0]);
+                executor.schedule(() -> AvatarSearch_AvtrDB.request_ingest_v3(subarray, attribution), time, TimeUnit.MILLISECONDS);
+            }
+            time = 0L;
+            for (String avatarId : avatarIds)
+            {
+                executor.schedule(() -> AvatarSearch_VRCDS.putAvatarExternal(avatarId, attribution), time, TimeUnit.MILLISECONDS);
+                executor.schedule(() -> AvatarSearch_WorldBalancer.putAvatarExternal(avatarId, attribution), time, TimeUnit.MILLISECONDS);
+                time += 15_000L;
+            }
+        }
     }
 
 }
