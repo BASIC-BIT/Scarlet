@@ -4,19 +4,20 @@
 # Install as root cron on the host. See docs/ALARM.md.
 set -eu
 
-ENV_FILE=/etc/scarlet-alarm.env
-STATE=/var/tmp/scarlet-alarm.down
+CURLRC=/etc/scarlet-alarm.curlrc
+STATE_DIR=/var/lib/scarlet-alarm
+STATE=$STATE_DIR/down
 
-[ -r "$ENV_FILE" ] || { echo "scarlet-alarm: cannot read $ENV_FILE" >&2; exit 2; }
-. "$ENV_FILE"
-[ -n "${SCARLET_ALARM_WEBHOOK:-}" ] || {
-    echo "scarlet-alarm: SCARLET_ALARM_WEBHOOK is not set in $ENV_FILE" >&2
-    exit 2
-}
+[ -r "$CURLRC" ] || { echo "scarlet-alarm: cannot read $CURLRC" >&2; exit 2; }
+install -d -m 700 -o root -g root "$STATE_DIR"
 
+# The webhook URL comes from the curl config file, so it never reaches argv and
+# never shows up in `ps`. This returns curl's exit status on purpose: the caller
+# only moves the marker when the message actually went out.
 post() {
-    curl -sS --max-time 10 -H 'Content-Type: application/json' \
-        -d "{\"content\":\"$1\"}" "$SCARLET_ALARM_WEBHOOK" >/dev/null 2>&1 || true
+    curl -sS -f --max-time 10 -K "$CURLRC" \
+        -H 'Content-Type: application/json' \
+        -d "{\"content\":\"$1\"}" >/dev/null 2>&1
 }
 
 running=$(docker inspect scarlet --format '{{.State.Running}}' 2>/dev/null || echo false)
@@ -25,9 +26,7 @@ if [ "$running" != "true" ] && [ ! -e "$STATE" ]; then
     detail=$(docker inspect scarlet \
         --format 'exit code {{.State.ExitCode}}, finished at {{.State.FinishedAt}}' \
         2>/dev/null || echo 'no container found')
-    post "Scarlet bot is down on $(hostname): $detail"
-    : > "$STATE"
+    post "Scarlet bot is down on $(hostname): $detail" && : > "$STATE"
 elif [ "$running" = "true" ] && [ -e "$STATE" ]; then
-    post "Scarlet bot is running again on $(hostname)."
-    rm -f "$STATE"
+    post "Scarlet bot is running again on $(hostname)." && rm -f "$STATE"
 fi
