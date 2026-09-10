@@ -24,8 +24,10 @@ COPY src ./src
 #       at io.github.vrchatapi.model.GroupPermissions.fromValue(GroupPermissions.java:104)
 #
 # That kills VRChat login outright, which is what actually took this bot down.
-# 1.20.9-nightly.5 is the first tag containing the value.
-RUN mvn -B -DskipTests -Dnanohttpd.version=2.3.1 -Dvrchatapi.version=1.20.9-nightly.5 package
+# 1.20.9-nightly.5 was the first tag containing the value. The pin is now the
+# stable 1.20.9 tag, released 2026-09-03, whose enum files differ from nightly.5
+# only by a doc-version comment, so the nightly pin is superseded.
+RUN mvn -B -DskipTests -Dnanohttpd.version=2.3.1 -Dvrchatapi.version=1.20.9 package
 
 # Stage 2: Runtime image (Java 8 JRE)
 FROM eclipse-temurin:8-jre
