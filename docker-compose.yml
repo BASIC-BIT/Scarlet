@@ -36,6 +36,8 @@ services:
     # Five attempts still absorbs a transient failure. What it will not do is
     # hammer a third-party API for a week unattended. A service that is still
     # down after five tries needs a human, not another retry.
+    # The other half of that policy is the alarm that tells the human: installed on
+    # the host as /usr/local/sbin/scarlet-alarm from scripts/scarlet-alarm.sh.
     restart: on-failure:5
     # Hard ceiling on the container. This host is shared with other services, so
     # an unbounded JVM here is their outage too: the old flags let the heap alone
