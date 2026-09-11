@@ -439,9 +439,9 @@ try
                     this.totpsecret.set(secret);
                     this.scarlet.settings.getJson().remove("vrc_secret");
                 }
+                boolean authed = false;
                 if (secret != null && (secret = secret.replaceAll("[^A-Za-z2-7=]", "")).length() == 32)
                 {
-                    boolean authed = false;
                     for (int tries = 2; !authed && tries --> 0; MiscUtils.sleep(3_000L)) try
                     {
                         // use VRChatAPI time to work around potential local system time drift
@@ -459,16 +459,19 @@ try
                     }
                 }
                 
-                for (boolean needsTotp = true; needsTotp && this.scarlet.running;) try
+                if (!authed)
                 {
-                    if (needsTotp = !auth.verify2FA(new TwoFactorAuthCode().code(this.scarlet.settings.requireInput("Totp code", true))).getVerified().booleanValue())
-                        LOG.error("Invalid totp code");
+                    for (boolean needsTotp = true; needsTotp && this.scarlet.running;) try
+                    {
+                        if (needsTotp = !auth.verify2FA(new TwoFactorAuthCode().code(this.scarlet.settings.requireInput("Totp code", true))).getVerified().booleanValue())
+                            LOG.error("Invalid totp code");
+                    }
+                    catch (ApiException apiex)
+                    {
+                        LOG.error("Exception using totp", apiex);
+                    }
                 }
-                catch (ApiException apiex)
-                {
-                    LOG.error("Exception using totp", apiex);
-                }
-                
+
                 LOG.info("Logged in (2fa-totp)");
             }
             else if (twoFactorMethods.contains("emailOtp"))
